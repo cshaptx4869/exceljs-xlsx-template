@@ -1,6 +1,6 @@
 {
   "name": "exceljs-xlsx-template",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Generate .xlsx file from .xlsx template",
   "keywords": [
     "exceljs",
@@ -19,9 +19,14 @@
   },
   "main": "./src/index.js",
   "scripts": {
-    "test": "node test/test.js"
+    "test": "node test/test.js",
+    "build": "webpack"
   },
   "dependencies": {
     "exceljs": "^4.4.0"
+  },
+  "devDependencies": {
+    "webpack": "^5.98.0",
+    "webpack-cli": "^6.0.1"
   }
 }
