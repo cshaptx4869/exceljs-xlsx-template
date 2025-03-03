@@ -1,0 +1,27 @@
+{
+  "name": "exceljs-xlsx-template",
+  "version": "1.0.0",
+  "description": "Generate .xlsx file from .xlsx template",
+  "keywords": [
+    "exceljs",
+    "xlsx",
+    "template"
+  ],
+  "private": false,
+  "license": "MIT",
+  "author": {
+    "name": "cshaptx4869",
+    "email": "994774638@qq.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cshaptx4869/exceljs-xlsx-template.git"
+  },
+  "main": "./src/index.js",
+  "scripts": {
+    "test": "node test/test.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}
