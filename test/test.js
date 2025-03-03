@@ -54,14 +54,16 @@ async function main() {
     }
   });
   // 保存为新的 Excel 文件
-  const output = path.join(__dirname, "output", `${Date.now()}.xlsx`);
+  const outputDir = path.join(__dirname, "output");
+  !fs.existsSync(outputDir) && fs.mkdirSync(outputDir);
+  const output = path.join(outputDir, `${Date.now()}.xlsx`);
   await saveWorkbook(workbook, output);
   return output;
 }
 
 main()
   .then((res) => {
-    console.log("🚀 ~ file:", res);
+    console.log("🚀 ~ output:", res);
   })
   .catch((error) => {
     console.error("Error processing Excel file:", error);
