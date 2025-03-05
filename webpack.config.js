@@ -2,6 +2,11 @@ const path = require("path");
 const TerserPlugin = require("terser-webpack-plugin");
 
 module.exports = {
+  target: "web", // 目标环境是浏览器
+  externals: {
+    http: "commonjs http", // 不要打包 http 模块
+    https: "commonjs https", // 不要打包 https 模块
+  },
   entry: "./src/index.js",
   output: {
     filename: "bundle.js",

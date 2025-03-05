@@ -1,11 +1,15 @@
 # exceljs-xlsx-template
 
-基于 [exceljs](https://github.com/exceljs/exceljs) 库的 .xlsx 模板文件填充引擎。
+基于 [exceljs](https://github.com/exceljs/exceljs) 库的 .xlsx 模板文件填充引擎。理论上支持 exceljs 库的所有 [api](https://github.com/exceljs/exceljs/blob/master/README_zh.md#目录)。
 
 - 单标签占位符格式：`{{xxx}}`
 - 迭代标签占位符格式：`{{xxx.xxx}}`
 
-使用示例：
+安装：`npm install exceljs-xlsx-template`
+
+示例：
+
+> 详见test目录下的test.js和test.html
 
 ```javascript
 const path = require("path");

@@ -5,23 +5,27 @@ const isBrowser = typeof window !== "undefined" && typeof document !== "undefine
 
 /**
  * 加载工作簿
- * @param {string|Buffer|ArrayBuffer|Blob|File} input
+ * @param {string|ArrayBuffer|Blob|Buffer} input
  * @returns {Promise<ExcelJS.Workbook>}
  */
 async function loadWorkbook(input) {
   const workbook = new ExcelJS.Workbook();
+  const httpRegex = /^https?:\/\//;
   if (isBrowser) {
-    if (input instanceof Blob || input instanceof File) {
-      const arrayBuffer = await input.arrayBuffer();
-      await workbook.xlsx.load(arrayBuffer);
-    } else if (input instanceof ArrayBuffer) {
+    if (typeof input === "string" && httpRegex.test(input)) {
+      await workbook.xlsx.load(await fetchUrlFile(input));
+    } else if (input instanceof Blob || input instanceof ArrayBuffer) {
       await workbook.xlsx.load(input);
     } else {
       throw new Error("Unsupported input type in browser environment. Expected Blob, File, ArrayBuffer.");
     }
   } else {
     if (typeof input === "string") {
-      await workbook.xlsx.readFile(input);
+      if (httpRegex.test(input)) {
+        await workbook.xlsx.load(await fetchUrlFile(input));
+      } else {
+        await workbook.xlsx.readFile(input);
+      }
     } else if (input instanceof Buffer || input instanceof ArrayBuffer) {
       await workbook.xlsx.load(input);
     } else if (typeof input.pipe === "function") {
@@ -211,6 +215,48 @@ async function saveWorkbook(workbook, output) {
     URL.revokeObjectURL(link.href);
   } else {
     await workbook.xlsx.writeFile(output);
+  }
+}
+
+/**
+ * 获取url文件
+ * @param {string} url
+ * @returns {Promise<Blob|Buffer>}
+ */
+async function fetchUrlFile(url) {
+  if (isBrowser) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${url}, status code: ${response.status}`);
+      }
+      return await response.blob();
+    } catch (error) {
+      throw new Error(`Error fetching ${url}: ${error.message}`);
+    }
+  } else {
+    const http = require("http");
+    const https = require("https");
+    const protocol = /^https:\/\//.test(url) ? https : http;
+    return new Promise((resolve, reject) => {
+      protocol
+        .get(url, (response) => {
+          if (response.statusCode !== 200) {
+            reject(new Error(`Failed to fetch ${url}, status code: ${response.statusCode}`));
+            return;
+          }
+
+          const chunks = [];
+          response.on("data", (chunk) => chunks.push(chunk));
+          response.on("end", () => {
+            const buffer = Buffer.concat(chunks);
+            resolve(buffer);
+          });
+        })
+        .on("error", (err) => {
+          reject(err);
+        });
+    });
   }
 }
 
