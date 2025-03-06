@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import ExcelJS from "exceljs";
 
 /**
  * 加载工作簿
@@ -11,9 +11,14 @@ declare function loadWorkbook(input: string | Buffer | ArrayBuffer | Blob | File
  * 填充Excel模板
  * @param {ExcelJS.Workbook} workbook
  * @param {Array<Record<string, any>>} workbookData
+ * @param {boolean} parseImage
  * @returns {Promise<ExcelJS.Workbook>}
  */
-declare function fillTemplate(workbook: ExcelJS.Workbook, workbookData: Array<Record<string, any>>): Promise<ExcelJS.Workbook>;
+declare function fillTemplate(
+  workbook: ExcelJS.Workbook,
+  workbookData: Array<Record<string, any>>,
+  parseImage?: boolean
+): Promise<ExcelJS.Workbook>;
 
 /**
  * 保存工作簿到文件

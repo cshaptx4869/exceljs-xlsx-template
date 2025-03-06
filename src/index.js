@@ -43,9 +43,10 @@ async function loadWorkbook(input) {
  * 填充Excel模板
  * @param {ExcelJS.Workbook} workbook
  * @param {Array} workbookData
+ * @param {boolean} parseImage
  * @returns {Promise<ExcelJS.Workbook>}
  */
-async function fillTemplate(workbook, workbookData) {
+async function fillTemplate(workbook, workbookData, parseImage = false) {
   // 工作表待合并单元格信息
   const sheetDynamicMerges = {};
 
@@ -57,14 +58,7 @@ async function fillTemplate(workbook, workbookData) {
     sheetIndex++;
     if (worksheetData && typeof worksheetData === "object") {
       // NOTE 合并信息是静态的，不会随着行增加而实时更新
-      const originMerges = worksheet.model.merges.map((merge) => {
-        // C30:D30
-        const [startCell, endCell] = merge.split(":");
-        return {
-          start: { row: worksheet.getCell(startCell).row, col: worksheet.getCell(startCell).col },
-          end: { row: worksheet.getCell(endCell).row, col: worksheet.getCell(endCell).col },
-        };
-      });
+      const originMerges = sheetMergeInfo(worksheet);
 
       // 替换单字段占位符
       worksheet.eachRow((row, rowNumber) => {
@@ -188,12 +182,15 @@ async function fillTemplate(workbook, workbookData) {
           try {
             worksheet.mergeCells(merge);
           } catch (error) {
-            console.warn(`Fail to merge cells ${merge}: ${error.message}`);
+            console.warn(`Fail to merge cells ${merge}`);
           }
         });
       }
     });
   }
+
+  // 第三步：填充图片
+  parseImage && (await fillImage(workbook));
 
   return workbook;
 }
@@ -216,6 +213,22 @@ async function saveWorkbook(workbook, output) {
   } else {
     await workbook.xlsx.writeFile(output);
   }
+}
+
+/**
+ * 获取工作表合并信息
+ * @param {ExcelJS.Worksheet} worksheet
+ * @returns {Array<{start: {row: number, col: number}, end: {row: number, col: number}}>}
+ */
+function sheetMergeInfo(worksheet) {
+  return worksheet.model.merges.map((merge) => {
+    // C30:D30
+    const [startCell, endCell] = merge.split(":");
+    return {
+      start: { row: worksheet.getCell(startCell).row, col: worksheet.getCell(startCell).col },
+      end: { row: worksheet.getCell(endCell).row, col: worksheet.getCell(endCell).col },
+    };
+  });
 }
 
 /**
@@ -258,6 +271,74 @@ async function fetchUrlFile(url) {
         });
     });
   }
+}
+
+/**
+ * 填充图片
+ * @param {ExcelJS.Workbook} workbook
+ */
+async function fillImage(workbook) {
+  const workbookImage = {};
+  const invalidImages = [];
+  const imageRegex = /https?:\/\/[^\s]+?\.(jpe?g|gif|png)/i;
+  // NOTE eachSheet、eachRow、eachCell都是同步方法，不会等待异步操作完成
+  // 遍历每个工作表
+  for (let i = 0; i < workbook.worksheets.length; i++) {
+    const worksheet = workbook.worksheets[i];
+    const originMerges = sheetMergeInfo(worksheet);
+    // 遍历每一行
+    for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber++) {
+      const row = worksheet.getRow(rowNumber);
+      // 遍历每个单元格
+      for (let colNumber = 1; colNumber <= row.cellCount; colNumber++) {
+        const cell = row.getCell(colNumber);
+        // 检查单元格的值是否是图片地址
+        if (typeof cell.value === "string" && cell.value.match(imageRegex)) {
+          const matches = cell.value.match(imageRegex);
+          const imageUrl = matches[0];
+          const imageExt = matches[1];
+          if (invalidImages.includes(imageUrl)) {
+            continue;
+          }
+          // 如果图片未缓存，则加载图片
+          if (workbookImage[imageUrl] === undefined) {
+            let fileContent = null;
+            try {
+              fileContent = await fetchUrlFile(imageUrl);
+            } catch {
+              invalidImages.push(imageUrl);
+              console.warn(`Fail to load image ${imageUrl}`);
+              continue;
+            }
+            // 将图片添加到工作簿中
+            workbookImage[imageUrl] = workbook.addImage({
+              buffer: fileContent,
+              extension: imageExt === "jpg" ? "jpeg" : imageExt,
+            });
+          }
+          // 将图片添加到工作表中
+          const merge = originMerges.find((merge) => {
+            return merge.start.row === rowNumber && merge.start.col === colNumber;
+          });
+          // 坐标系基于零，A1 的左上角将为 {col：0，row：0}，右下角为 {col：1，row：1}
+          worksheet.addImage(workbookImage[imageUrl], {
+            tl: {
+              col: merge ? merge.start.col - 1 : colNumber - 1,
+              row: merge ? merge.start.row - 1 : rowNumber - 1,
+            },
+            br: {
+              col: merge ? merge.end.col : colNumber,
+              row: merge ? merge.end.row : rowNumber,
+            },
+          });
+          // 去除图片地址
+          cell.value = cell.value.replace(imageRegex, "");
+        }
+      }
+    }
+  }
+
+  return workbook;
 }
 
 module.exports = { loadWorkbook, fillTemplate, saveWorkbook };

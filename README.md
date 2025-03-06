@@ -5,7 +5,37 @@
 - 单标签占位符格式：`{{xxx}}`
 - 迭代标签占位符格式：`{{xxx.xxx}}`
 
-安装：`npm install exceljs-xlsx-template`
+接口：
+
+```typescript
+/**
+ * 加载工作簿
+ * @param {string | Buffer | ArrayBuffer | Blob | File} input
+ * @returns {Promise<ExcelJS.Workbook>}
+ */
+declare function loadWorkbook(input: string | Buffer | ArrayBuffer | Blob | File): Promise<ExcelJS.Workbook>;
+
+/**
+ * 填充Excel模板
+ * @param {ExcelJS.Workbook} workbook
+ * @param {Array<Record<string, any>>} workbookData
+ * @param {boolean} parseImage
+ * @returns {Promise<ExcelJS.Workbook>}
+ */
+declare function fillTemplate(
+  workbook: ExcelJS.Workbook,
+  workbookData: Array<Record<string, any>>,
+  parseImage?: boolean
+): Promise<ExcelJS.Workbook>;
+
+/**
+ * 保存工作簿到文件
+ * @param {ExcelJS.Workbook} workbook
+ * @param {string} output
+ * @returns {Promise<void>}
+ */
+declare function saveWorkbook(workbook: ExcelJS.Workbook, output: string): Promise<void>;
+```
 
 示例：
 
@@ -41,11 +71,8 @@ const data = [
 ];
 
 async function main() {
-  // 方式一：本地文件
-  // const workbook = await loadWorkbook(input);
-  // 方式二：从文件读取二进制数据到缓冲区
-  const buffer = fs.readFileSync(input);
-  const workbook = await loadWorkbook(buffer);
+  // 加载工作簿
+  const workbook = await loadWorkbook(input);
   // 填充模板
   await fillTemplate(workbook, data);
   // 添加图片印章
