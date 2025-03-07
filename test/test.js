@@ -1,9 +1,10 @@
 const path = require("path");
 const fs = require("fs");
-const { fillTemplate, loadWorkbook, saveWorkbook } = require("../src/index.js");
+const { fillTemplate, loadWorkbook, saveWorkbook, placeholderRange } = require("../src/index.js");
 
-const input = path.join(__dirname, "assets", "template.xlsx");
-const officialseal = path.join(__dirname, "assets", "officialseal.png");
+const xlsxFile = path.join(__dirname, "assets", "template.xlsx");
+const officialsealFile = path.join(__dirname, "assets", "officialseal.png");
+const imageUrl = "https://s2.loli.net/2025/03/07/ELZY594enrJwF7G.png";
 const data = [
   {
     name: "John",
@@ -19,38 +20,35 @@ const data = [
       { no: "No.9", name: "UniApp" },
     ],
     projects: [
-      { name: "Project 1", description: "Description 1" },
-      { name: "Project 2", description: "Description 2" },
-      { name: "Project 3", description: "Description 3" },
+      { name: "Project 1", description: "Description 1", image: imageUrl },
+      { name: "Project 2", description: "Description 2", image: imageUrl },
+      { name: "Project 3", description: "Description 3", image: imageUrl },
     ],
   },
 ];
 
 async function main() {
-  // 方式一：本地文件
-  // const workbook = await loadWorkbook(input);
-  // 方式二：从文件读取二进制数据到缓冲区
-  const buffer = fs.readFileSync(input);
-  const workbook = await loadWorkbook(buffer);
+  // 加载Excel文件
+  const workbook = await loadWorkbook(xlsxFile);
   // 填充模板
-  await fillTemplate(workbook, data);
-  // 添加图片印章
-  const imageId = workbook.addImage({
-    filename: officialseal,
-    extension: "png",
-  });
+  await fillTemplate(workbook, data, true);
+  // 遍历每个工作表
   workbook.eachSheet((worksheet, sheetId) => {
-    // 第1张sheet表添加印章
     if (sheetId === 1) {
-      // 获取表格的最后一行最后一列
-      const lastRow = worksheet.lastRow;
-      const lastColumn = worksheet.lastColumn;
-      // 插入图片到表格中
-      worksheet.addImage(imageId, {
-        // 左上角位置
-        tl: { col: lastColumn.number / 2, row: lastRow.number - 8 },
-        ext: { width: 200, height: 200 },
+      // 将图片添加到工作簿
+      const imageId = workbook.addImage({
+        filename: officialsealFile,
+        extension: "png",
       });
+      // 获取印章占位符位置信息
+      const range = placeholderRange(worksheet, "{{#officialseal}}");
+      if (range) {
+        // 插入图片到表格中
+        worksheet.addImage(imageId, {
+          tl: { col: range.start.col, row: range.start.row - 4 },
+          ext: { width: 200, height: 200 },
+        });
+      }
     }
   });
   // 保存为新的 Excel 文件

@@ -5,21 +5,21 @@
 - 单标签占位符格式：`{{xxx}}`
 - 迭代标签占位符格式：`{{xxx.xxx}}`
 
-接口：
+## 接口
 
 ```typescript
 /**
  * 加载工作簿
- * @param {string | Buffer | ArrayBuffer | Blob | File} input
+ * @param {string | ArrayBuffer | Blob | Buffer} input - 输入数据，可以是本地路径、URL地址、ArrayBuffer、Blob、Buffer
  * @returns {Promise<ExcelJS.Workbook>}
  */
-declare function loadWorkbook(input: string | Buffer | ArrayBuffer | Blob | File): Promise<ExcelJS.Workbook>;
+declare function loadWorkbook(input: string | ArrayBuffer | Blob | Buffer): Promise<ExcelJS.Workbook>;
 
 /**
  * 填充Excel模板
  * @param {ExcelJS.Workbook} workbook
- * @param {Array<Record<string, any>>} workbookData
- * @param {boolean} parseImage
+ * @param {Array<Record<string, any>>} workbookData - 包含模板数据的数组对象
+ * @param {boolean} parseImage - 是否解析图片，默认为 false
  * @returns {Promise<ExcelJS.Workbook>}
  */
 declare function fillTemplate(
@@ -31,23 +31,37 @@ declare function fillTemplate(
 /**
  * 保存工作簿到文件
  * @param {ExcelJS.Workbook} workbook
- * @param {string} output
+ * @param {string} output - 输出文件路径或文件名
  * @returns {Promise<void>}
  */
 declare function saveWorkbook(workbook: ExcelJS.Workbook, output: string): Promise<void>;
+
+/**
+ * 获取自定义占位符单元格范围
+ * @param {ExcelJS.Worksheet} worksheet
+ * @param {string} placeholder - 占位符字符串，默认为 "{{#placeholder}}"
+ * @param {boolean} clearMatch - 是否清除占位符，默认为 true
+ * @returns {{start: {row: number, col: number}, end: {row: number, col: number}}|null}
+ */
+declare function placeholderRange(
+  worksheet: ExcelJS.Worksheet,
+  placeholder?: string,
+  clearMatch?: boolean
+): { start: { row: number; col: number }; end: { row: number; col: number } } | null;
 ```
 
-示例：
+## 示例
 
 > 详见test目录下的test.js和test.html
 
 ```javascript
 const path = require("path");
 const fs = require("fs");
-const { fillTemplate, loadWorkbook, saveWorkbook } = require("exceljs-xlsx-template");
+const { fillTemplate, loadWorkbook, saveWorkbook, placeholderRange } = require("exceljs-xlsx-template");
 
-const input = path.join(__dirname, "assets", "template.xlsx");
-const officialseal = path.join(__dirname, "assets", "officialseal.png");
+const xlsxFile = path.join(__dirname, "assets", "template.xlsx");
+const officialsealFile = path.join(__dirname, "assets", "officialseal.png");
+const imageUrl = "https://s2.loli.net/2025/03/07/ELZY594enrJwF7G.png";
 const data = [
   {
     name: "John",
@@ -63,49 +77,54 @@ const data = [
       { no: "No.9", name: "UniApp" },
     ],
     projects: [
-      { name: "Project 1", description: "Description 1" },
-      { name: "Project 2", description: "Description 2" },
-      { name: "Project 3", description: "Description 3" },
+      { name: "Project 1", description: "Description 1", image: imageUrl },
+      { name: "Project 2", description: "Description 2", image: imageUrl },
+      { name: "Project 3", description: "Description 3", image: imageUrl },
     ],
   },
 ];
 
 async function main() {
-  // 加载工作簿
-  const workbook = await loadWorkbook(input);
+  // 加载Excel文件
+  const workbook = await loadWorkbook(xlsxFile);
   // 填充模板
-  await fillTemplate(workbook, data);
-  // 添加图片印章
-  const imageId = workbook.addImage({
-    filename: officialseal,
-    extension: "png",
-  });
+  await fillTemplate(workbook, data, true);
+  // 遍历每个工作表
   workbook.eachSheet((worksheet, sheetId) => {
-    // 第1张sheet表添加印章
     if (sheetId === 1) {
-      // 获取表格的最后一行最后一列
-      const lastRow = worksheet.lastRow;
-      const lastColumn = worksheet.lastColumn;
-      // 插入图片到表格中
-      worksheet.addImage(imageId, {
-        // 左上角位置
-        tl: { col: lastColumn.number / 2, row: lastRow.number - 8 },
-        ext: { width: 200, height: 200 },
+      // 将图片添加到工作簿
+      const imageId = workbook.addImage({
+        filename: officialsealFile,
+        extension: "png",
       });
+      // 获取印章占位符位置信息
+      const range = placeholderRange(worksheet, "{{#officialseal}}");
+      if (range) {
+        // 插入图片到表格中
+        worksheet.addImage(imageId, {
+          tl: { col: range.start.col, row: range.start.row - 4 },
+          ext: { width: 200, height: 200 },
+        });
+      }
     }
   });
   // 保存为新的 Excel 文件
-  const output = path.join(__dirname, "output", `${Date.now()}.xlsx`);
+  const outputDir = path.join(__dirname, "output");
+  !fs.existsSync(outputDir) && fs.mkdirSync(outputDir);
+  const output = path.join(outputDir, `${Date.now()}.xlsx`);
   await saveWorkbook(workbook, output);
   return output;
 }
 
 main()
   .then((res) => {
-    console.log("🚀 ~ file:", res);
+    console.log("🚀 ~ output:", res);
   })
   .catch((error) => {
     console.error("Error processing Excel file:", error);
   });
 ```
 
+![input](.\test\assets\input.png)
+
+![input](.\test\assets\output.png)

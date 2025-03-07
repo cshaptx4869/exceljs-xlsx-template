@@ -5,7 +5,7 @@ const isBrowser = typeof window !== "undefined" && typeof document !== "undefine
 
 /**
  * 加载工作簿
- * @param {string|ArrayBuffer|Blob|Buffer} input
+ * @param {string|ArrayBuffer|Blob|Buffer} input - 输入数据，可以是本地路径、URL地址、ArrayBuffer、Blob、Buffer
  * @returns {Promise<ExcelJS.Workbook>}
  */
 async function loadWorkbook(input) {
@@ -42,8 +42,8 @@ async function loadWorkbook(input) {
 /**
  * 填充Excel模板
  * @param {ExcelJS.Workbook} workbook
- * @param {Array} workbookData
- * @param {boolean} parseImage
+ * @param {Array<Record<string, any>>} workbookData - 包含模板数据的数组对象
+ * @param {boolean} parseImage - 是否解析图片，默认为 false
  * @returns {Promise<ExcelJS.Workbook>}
  */
 async function fillTemplate(workbook, workbookData, parseImage = false) {
@@ -198,7 +198,7 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
 /**
  * 保存工作簿到文件
  * @param {ExcelJS.Workbook} workbook
- * @param {string} output
+ * @param {string} output - 输出文件路径或文件名
  * @returns {Promise<void>}
  */
 async function saveWorkbook(workbook, output) {
@@ -213,6 +213,43 @@ async function saveWorkbook(workbook, output) {
   } else {
     await workbook.xlsx.writeFile(output);
   }
+}
+
+/**
+ * 获取自定义占位符单元格范围
+ * @param {ExcelJS.Worksheet} worksheet
+ * @param {string} placeholder - 占位符字符串，默认为 "{{#placeholder}}"
+ * @param {boolean} clearMatch - 是否清除占位符，默认为 true
+ * @returns {{start: {row: number, col: number}, end: {row: number, col: number}}|null}
+ */
+function placeholderRange(worksheet, placeholder = "{{#placeholder}}", clearMatch = true) {
+  let result = null;
+  const originMerges = sheetMergeInfo(worksheet);
+  // 遍历每一行
+  outer: for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber++) {
+    const row = worksheet.getRow(rowNumber);
+    // 遍历每个单元格
+    for (let colNumber = 1; colNumber <= row.cellCount; colNumber++) {
+      const cell = row.getCell(colNumber);
+      // 单元格值中是否包含占位符
+      if (typeof cell.value === "string" && cell.value.includes(`${placeholder}`)) {
+        const info = originMerges.find((merge) => {
+          return merge.start.row === rowNumber && merge.start.col === colNumber;
+        });
+        result = info ?? {
+          start: { row: rowNumber, col: colNumber },
+          end: { row: rowNumber, col: colNumber },
+        };
+        // 去除占位符
+        if (clearMatch) {
+          cell.value = cell.value.replace(new RegExp(`${placeholder}`, "g"), "");
+        }
+        // 跳出循环
+        break outer;
+      }
+    }
+  }
+  return result;
 }
 
 /**
@@ -322,10 +359,12 @@ async function fillImage(workbook) {
           });
           // 坐标系基于零，A1 的左上角将为 {col：0，row：0}，右下角为 {col：1，row：1}
           worksheet.addImage(workbookImage[imageUrl], {
+            // 左上角
             tl: {
               col: merge ? merge.start.col - 1 : colNumber - 1,
               row: merge ? merge.start.row - 1 : rowNumber - 1,
             },
+            // 右下角
             br: {
               col: merge ? merge.end.col : colNumber,
               row: merge ? merge.end.row : rowNumber,
@@ -341,4 +380,9 @@ async function fillImage(workbook) {
   return workbook;
 }
 
-module.exports = { loadWorkbook, fillTemplate, saveWorkbook };
+module.exports = {
+  loadWorkbook,
+  fillTemplate,
+  saveWorkbook,
+  placeholderRange,
+};
