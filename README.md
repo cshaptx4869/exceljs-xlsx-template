@@ -125,6 +125,7 @@ main()
   });
 ```
 
-![input](.\test\assets\input.png)
+![input](https://s2.loli.net/2025/03/07/1Fq5zJ394srtaLh.png)
 
-![input](.\test\assets\output.png)
+![output](https://s2.loli.net/2025/03/07/5tCniMqKkPXDOvY.png)
+
