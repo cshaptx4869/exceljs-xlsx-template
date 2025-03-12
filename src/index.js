@@ -47,99 +47,99 @@ async function loadWorkbook(input) {
  * @returns {Promise<ExcelJS.Workbook>}
  */
 async function fillTemplate(workbook, workbookData, parseImage = false) {
+  // 第一步：复制行并替换占位符
+  let sheetIndex = 0;
   // 工作表待合并单元格信息
   const sheetDynamicMerges = {};
-
-  // 第一步：复制行并替换占位符
+  const fieldRegex = /{{(\w+)}}/;
+  const iterationRegex = /{{(\w+)\.\w+}}/;
   // NOTE 工作簿的sheetId是按工作表创建的顺序从1开始递增
-  let sheetIndex = 0;
   workbook.eachSheet((worksheet, sheetId) => {
     const worksheetData = workbookData[sheetIndex];
     sheetIndex++;
     if (worksheetData && typeof worksheetData === "object") {
-      // NOTE 合并信息是静态的，不会随着行增加而实时更新
-      const originMerges = sheetMergeInfo(worksheet);
-
-      // 替换单字段占位符
-      worksheet.eachRow((row, rowNumber) => {
-        row.eachCell((cell, colNumber) => {
-          if (typeof cell.value === "string") {
-            for (const key in worksheetData) {
-              if (typeof worksheetData[key] !== "object" && cell.value.includes(`{{${key}}}`)) {
-                cell.value = cell.value.replace(new RegExp(`{{${key}}}`, "g"), worksheetData[key]);
-              }
-            }
-          }
-        });
-      });
-
-      // 查找所有迭代标签
+      // 单标签替换和迭代标签信息收集
       const iterationTags = [];
       const iterationRowNumbers = [];
       worksheet.eachRow((row, rowNumber) => {
         // 标记当前行是否已经找到迭代标签
         let isIterationRow = false;
-        const iterationRegex = /{{([^\.]+)\.[^}]+}}/;
         row.eachCell((cell, colNumber) => {
-          if (!isIterationRow && typeof cell.value === "string" && cell.value.match(iterationRegex)) {
-            isIterationRow = true;
-            const iterFieldName = cell.value.match(iterationRegex)[1];
-            iterationTags.push({ iterStartRow: rowNumber, iterFieldName });
-            iterationRowNumbers.push(rowNumber);
-          }
-        });
-      });
-      // 迭代行并替换迭代字段占位符
-      let iterOffset = 0;
-      iterationTags.forEach(({ iterStartRow, iterFieldName }, iterationTagIndex) => {
-        if (Array.isArray(worksheetData[iterFieldName])) {
-          const iterData = worksheetData[iterFieldName];
-          // 调整后的起始行
-          const adjustedStartRow = iterStartRow + iterOffset;
-          // 多行的情况下，需要复制多行
-          if (iterData.length > 1) {
-            // 一次性复制多行
-            // NOTE 复制的行不会复制合并信息
-            worksheet.duplicateRow(adjustedStartRow, iterData.length - 1, true);
-            // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
-            const merges = originMerges.filter((merge) => {
-              return merge.start.row <= iterStartRow && merge.end.row >= iterStartRow;
-            });
-            if (merges.length > 0) {
-              if (!sheetDynamicMerges[sheetId]) {
-                sheetDynamicMerges[sheetId] = [];
+          if (typeof cell.value === "string") {
+            if (cell.value.match(fieldRegex)) {
+              // 替换单字段占位符
+              const fieldName = cell.value.match(fieldRegex)[1];
+              if (fieldName in worksheetData && typeof worksheetData[fieldName] !== "object") {
+                cell.value = cell.value.replace(new RegExp(`{{${fieldName}}}`, "g"), worksheetData[fieldName]);
               }
-              // NOTE 在浏览器环境，动态增加的行会使其后面的行取消合并单元格
-              const startFixIndex = isBrowser ? (iterationTagIndex === 0 ? 1 : 0) : 1;
-              for (let i = startFixIndex; i < iterData.length; i++) {
-                for (const merge of merges) {
-                  sheetDynamicMerges[sheetId].push([
-                    merge.start.row + i + iterOffset,
-                    merge.start.col,
-                    merge.end.row + i + iterOffset,
-                    merge.end.col,
-                  ]);
-                }
+            } else if (!isIterationRow && cell.value.match(iterationRegex)) {
+              // 迭代标签信息搜集
+              const iterFieldName = cell.value.match(iterationRegex)[1];
+              if (iterFieldName in worksheetData && Array.isArray(worksheetData[iterFieldName])) {
+                isIterationRow = true;
+                iterationTags.push({ iterStartRow: rowNumber, iterFieldName });
+                iterationRowNumbers.push(rowNumber);
               }
             }
           }
-          // 替换迭代行中的占位符
-          for (let i = 0; i < iterData.length; i++) {
-            const currentRow = worksheet.getRow(adjustedStartRow + i);
-            currentRow.eachCell((cell, colNumber) => {
-              if (typeof cell.value === "string") {
-                // 替换迭代字段占位符
-                for (const key in iterData[i]) {
-                  if (cell.value.includes(`{{${iterFieldName}.${key}}}`)) {
-                    cell.value = cell.value.replace(new RegExp(`{{${iterFieldName}.${key}}}`, "g"), iterData[i][key]);
-                  }
+        });
+      });
+      // 迭代标签处理
+      if (iterationTags.length === 0) {
+        return;
+      }
+      // 合并单元格信息
+      // NOTE 合并信息是静态的，不会随着行增加而实时更新
+      const originMerges = sheetMergeInfo(worksheet);
+      // 迭代行并替换迭代字段占位符
+      let iterOffset = 0;
+      iterationTags.forEach(({ iterStartRow, iterFieldName }, iterationTagIndex) => {
+        const iterData = worksheetData[iterFieldName];
+        // 调整后的起始行
+        const adjustedStartRow = iterStartRow + iterOffset;
+        // 多行的情况下，需要复制多行
+        if (iterData.length > 1) {
+          // 一次性复制多行
+          // NOTE 复制的行不会复制合并信息
+          worksheet.duplicateRow(adjustedStartRow, iterData.length - 1, true);
+          // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
+          const merges = originMerges.filter((merge) => {
+            return merge.start.row <= iterStartRow && merge.end.row >= iterStartRow;
+          });
+          if (merges.length > 0) {
+            if (!sheetDynamicMerges[sheetId]) {
+              sheetDynamicMerges[sheetId] = [];
+            }
+            // NOTE 在浏览器环境，动态增加的行会使其后面的行取消合并单元格
+            const startFixIndex = isBrowser ? (iterationTagIndex === 0 ? 1 : 0) : 1;
+            for (let i = startFixIndex; i < iterData.length; i++) {
+              for (const merge of merges) {
+                sheetDynamicMerges[sheetId].push([
+                  merge.start.row + i + iterOffset,
+                  merge.start.col,
+                  merge.end.row + i + iterOffset,
+                  merge.end.col,
+                ]);
+              }
+            }
+          }
+        }
+        // 替换迭代行中的占位符
+        for (let i = 0; i < iterData.length; i++) {
+          const currentRow = worksheet.getRow(adjustedStartRow + i);
+          currentRow.eachCell((cell, colNumber) => {
+            if (typeof cell.value === "string") {
+              // 替换迭代字段占位符
+              for (const key in iterData[i]) {
+                if (cell.value.includes(`{{${iterFieldName}.${key}}}`)) {
+                  cell.value = cell.value.replace(new RegExp(`{{${iterFieldName}.${key}}}`, "g"), iterData[i][key]);
                 }
               }
-            });
-          }
-          // 更新行号偏移量
-          iterOffset += iterData.length - 1;
+            }
+          });
         }
+        // 更新行号偏移量
+        iterOffset += iterData.length - 1;
       });
       // 修正浏览器环境下，迭代行之后的合并单元格信息
       if (isBrowser) {
@@ -280,32 +280,22 @@ async function fetchUrlFile(url) {
       if (!response.ok) {
         throw new Error(`Failed to fetch ${url}, status code: ${response.status}`);
       }
-      return await response.blob();
+      return response.blob();
     } catch (error) {
       throw new Error(`Error fetching ${url}: ${error.message}`);
     }
   } else {
-    const http = require("http");
-    const https = require("https");
-    const protocol = /^https:\/\//.test(url) ? https : http;
+    const { get } = /^https:\/\//.test(url) ? require("https") : require("http");
     return new Promise((resolve, reject) => {
-      protocol
-        .get(url, (response) => {
-          if (response.statusCode !== 200) {
-            reject(new Error(`Failed to fetch ${url}, status code: ${response.statusCode}`));
-            return;
-          }
-
-          const chunks = [];
-          response.on("data", (chunk) => chunks.push(chunk));
-          response.on("end", () => {
-            const buffer = Buffer.concat(chunks);
-            resolve(buffer);
-          });
-        })
-        .on("error", (err) => {
-          reject(err);
-        });
+      get(url, (response) => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Failed to fetch ${url}, status code: ${response.statusCode}`));
+          return;
+        }
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => resolve(Buffer.concat(chunks)));
+      }).on("error", (err) => reject(err));
     });
   }
 }

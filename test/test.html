@@ -93,7 +93,7 @@
           // 添加图片印章
           const officialsealRresponse = await fetch(officialseal);
           if (!officialsealRresponse.ok)
-            throw new Error(`Failed to download image file, status code: ${response.status}`);
+            throw new Error(`Failed to download image file, status code: ${officialsealRresponse.status}`);
           const officialsealArrayBuffer = await officialsealRresponse.arrayBuffer();
           // 遍历每个工作表
           workbook.eachSheet((worksheet, sheetId) => {

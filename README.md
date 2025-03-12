@@ -52,7 +52,7 @@ declare function placeholderRange(
 
 ## 示例
 
-> 详见test目录下的test.js和test.html
+> 详见 test 目录下的 test.js 或 test.html
 
 ```javascript
 const path = require("path");
@@ -128,4 +128,3 @@ main()
 ![input](https://s2.loli.net/2025/03/07/1Fq5zJ394srtaLh.png)
 
 ![output](https://s2.loli.net/2025/03/07/5tCniMqKkPXDOvY.png)
-
