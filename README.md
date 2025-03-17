@@ -52,7 +52,76 @@ declare function placeholderRange(
 
 ## 示例
 
-> 详见 test 目录下的 test.js 或 test.html
+支持浏览器和 node.js 环境下使用。可参考 test 目录下的 test.html 或 test.js。
+
+> vue3
+
+```vue
+<template>
+  <button type="button" @click="handleXlsxTemplate">xlsx模板填充</button>
+</template>
+
+<script setup lang="ts">
+import { fillTemplate, loadWorkbook, saveWorkbook, placeholderRange } from "exceljs-xlsx-template";
+
+async function handleXlsxTemplate() {
+  const imageUrl = "https://s2.loli.net/2025/03/07/ELZY594enrJwF7G.png";
+  const data = [
+    {
+      name: "John",
+      items: [
+        { no: "No.1", name: "JavaScript" },
+        { no: "No.2", name: "CSS" },
+        { no: "No.3", name: "HTML" },
+        { no: "No.4", name: "Node.js" },
+        { no: "No.5", name: "Three.js" },
+        { no: "No.6", name: "Vue" },
+        { no: "No.7", name: "React" },
+        { no: "No.8", name: "Angular" },
+        { no: "No.9", name: "UniApp" },
+      ],
+      projects: [
+        { name: "Project 1", description: "Description 1", image: imageUrl },
+        { name: "Project 2", description: "Description 2", image: imageUrl },
+        { name: "Project 3", description: "Description 3", image: imageUrl },
+      ],
+    },
+  ];
+  // 加载Excel文件
+  const workbook = await loadWorkbook("http://example.com/test/assets/template.xlsx");
+  // 填充模板
+  await fillTemplate(workbook, data, true);
+  // 加载印章图片
+  const officialsealResponse = await fetch(imageUrl);
+  if (!officialsealResponse.ok)
+    throw new Error(`Failed to download image file, status code: ${officialsealResponse.status}`);
+  const officialsealArrayBuffer = await officialsealResponse.arrayBuffer();
+  // 遍历每个工作表
+  workbook.eachSheet((worksheet, sheetId) => {
+    if (sheetId === 1) {
+      // 将图片添加到工作簿
+      const imageId = workbook.addImage({
+        buffer: officialsealArrayBuffer,
+        extension: "png",
+      });
+      // 获取印章占位符位置信息
+      const range = placeholderRange(worksheet, "{{#officialseal}}");
+      if (range) {
+        // 插入图片到表格中
+        worksheet.addImage(imageId, {
+          tl: { col: range.start.col, row: range.start.row - 4 },
+          ext: { width: 200, height: 200 },
+        });
+      }
+    }
+  });
+  // 保存为新的 Excel 文件
+  await saveWorkbook(workbook, `${Date.now()}.xlsx`);
+}
+</script>
+```
+
+> node.js
 
 ```javascript
 const path = require("path");
@@ -125,6 +194,8 @@ main()
   });
 ```
 
-![input](https://s2.loli.net/2025/03/07/1Fq5zJ394srtaLh.png)
+---
 
-![output](https://s2.loli.net/2025/03/07/5tCniMqKkPXDOvY.png)
+![input](https://github.com/user-attachments/assets/72329b94-004b-4587-a7ab-5a38864bea17)
+
+![output](https://github.com/user-attachments/assets/4aa5fa65-ca8a-4c6c-ba90-101137450ad7)
