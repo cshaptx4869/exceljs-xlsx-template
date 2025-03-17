@@ -60,10 +60,8 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
     if (worksheetData && typeof worksheetData === "object") {
       // 单标签替换和迭代标签信息收集
       const iterationTags = [];
-      const iterationRowNumbers = [];
       worksheet.eachRow((row, rowNumber) => {
-        // 标记当前行是否已经找到迭代标签
-        let isIterationRow = false;
+        const iterFieldNames = [];
         row.eachCell((cell, colNumber) => {
           if (typeof cell.value === "string") {
             if (cell.value.match(fieldRegex)) {
@@ -72,13 +70,26 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
               if (fieldName in worksheetData && typeof worksheetData[fieldName] !== "object") {
                 cell.value = cell.value.replace(new RegExp(`{{${fieldName}}}`, "g"), worksheetData[fieldName]);
               }
-            } else if (!isIterationRow && cell.value.match(iterationRegex)) {
+            } else if (cell.value.match(iterationRegex)) {
               // 迭代标签信息搜集
               const iterFieldName = cell.value.match(iterationRegex)[1];
-              if (iterFieldName in worksheetData && Array.isArray(worksheetData[iterFieldName])) {
-                isIterationRow = true;
-                iterationTags.push({ iterStartRow: rowNumber, iterFieldName });
-                iterationRowNumbers.push(rowNumber);
+              if (
+                iterFieldName in worksheetData &&
+                Array.isArray(worksheetData[iterFieldName]) &&
+                worksheetData[iterFieldName].length > 0
+              ) {
+                if (iterFieldNames.length === 0) {
+                  iterFieldNames.push(iterFieldName);
+                  iterationTags.push({ iterStartRow: rowNumber, iterFieldNames, iterFieldName });
+                } else {
+                  if (!iterFieldNames.includes(iterFieldName)) {
+                    iterFieldNames.push(iterFieldName);
+                    const lastIterationTag = iterationTags[iterationTags.length - 1];
+                    if (worksheetData[iterFieldName].length > worksheetData[lastIterationTag.iterFieldName].length) {
+                      lastIterationTag.iterFieldName = iterFieldName;
+                    }
+                  }
+                }
               }
             }
           }
@@ -93,15 +104,14 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
       const originMerges = sheetMergeInfo(worksheet);
       // 迭代行并替换迭代字段占位符
       let iterOffset = 0;
-      iterationTags.forEach(({ iterStartRow, iterFieldName }, iterationTagIndex) => {
-        const iterData = worksheetData[iterFieldName];
+      iterationTags.forEach(({ iterStartRow, iterFieldNames, iterFieldName }, iterationTagIndex) => {
         // 调整后的起始行
         const adjustedStartRow = iterStartRow + iterOffset;
         // 多行的情况下，需要复制多行
-        if (iterData.length > 1) {
+        if (worksheetData[iterFieldName].length > 1) {
           // 一次性复制多行
           // NOTE 复制的行不会复制合并信息
-          worksheet.duplicateRow(adjustedStartRow, iterData.length - 1, true);
+          worksheet.duplicateRow(adjustedStartRow, worksheetData[iterFieldName].length - 1, true);
           // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
           const merges = originMerges.filter((merge) => {
             return merge.start.row <= iterStartRow && merge.end.row >= iterStartRow;
@@ -112,7 +122,7 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
             }
             // NOTE 在浏览器环境，动态增加的行会使其后面的行取消合并单元格
             const startFixIndex = isBrowser ? (iterationTagIndex === 0 ? 1 : 0) : 1;
-            for (let i = startFixIndex; i < iterData.length; i++) {
+            for (let i = startFixIndex; i < worksheetData[iterFieldName].length; i++) {
               for (const merge of merges) {
                 sheetDynamicMerges[sheetId].push([
                   merge.start.row + i + iterOffset,
@@ -125,30 +135,42 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
           }
         }
         // 替换迭代行中的占位符
-        for (let i = 0; i < iterData.length; i++) {
+        for (let i = 0; i < worksheetData[iterFieldName].length; i++) {
           const currentRow = worksheet.getRow(adjustedStartRow + i);
           currentRow.eachCell((cell, colNumber) => {
             if (typeof cell.value === "string") {
-              // 替换迭代字段占位符
-              for (const key in iterData[i]) {
-                if (cell.value.includes(`{{${iterFieldName}.${key}}}`)) {
-                  cell.value = cell.value.replace(new RegExp(`{{${iterFieldName}.${key}}}`, "g"), iterData[i][key]);
+              for (iterField of iterFieldNames) {
+                const iterFieldData = worksheetData[iterField];
+                if (cell.value.includes(`{{${iterField}\.`)) {
+                  if (iterFieldData[i] !== undefined) {
+                    for (const key in iterFieldData[i]) {
+                      if (cell.value.includes(`{{${iterField}.${key}}}`)) {
+                        cell.value = cell.value.replace(
+                          new RegExp(`{{${iterField}.${key}}}`, "g"),
+                          iterFieldData[i][key]
+                        );
+                      }
+                    }
+                  } else {
+                    cell.value = null;
+                  }
                 }
               }
             }
           });
         }
         // 更新行号偏移量
-        iterOffset += iterData.length - 1;
+        iterOffset += worksheetData[iterFieldName].length - 1;
       });
       // 修正浏览器环境下，迭代行之后的合并单元格信息
       if (isBrowser) {
+        const iterRows = iterationTags.map(({ iterStartRow }) => iterStartRow);
         originMerges.forEach((merge) => {
           // 迭代后的偏移行
           let mergeOffset = 0;
           iterationTags.forEach(({ iterStartRow, iterFieldName }) => {
             if (Array.isArray(worksheetData[iterFieldName])) {
-              if (!iterationRowNumbers.includes(merge.start.row) && merge.start.row > iterStartRow) {
+              if (!iterRows.includes(merge.start.row) && merge.start.row > iterStartRow) {
                 mergeOffset += worksheetData[iterFieldName].length - 1;
               }
             }
