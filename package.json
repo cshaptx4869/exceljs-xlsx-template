@@ -1,6 +1,6 @@
 {
   "name": "exceljs-xlsx-template",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "description": "Generate .xlsx file from .xlsx template. Support for browsers and Node.js",
   "keywords": [
     "exceljs",
