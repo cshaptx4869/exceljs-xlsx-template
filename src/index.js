@@ -1,3 +1,5 @@
+"use strict";
+
 const ExcelJS = require("exceljs");
 
 // 是否在浏览器环境
@@ -190,7 +192,7 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
           const currentRow = worksheet.getRow(adjustedStartRow + i);
           currentRow.eachCell((cell, colNumber) => {
             if (typeof cell.value === "string") {
-              for (iterField of iterFieldNames) {
+              for (const iterField of iterFieldNames) {
                 const iterFieldData = worksheetData[iterField];
                 if (cell.value.includes(`{{${iterField}\.`)) {
                   if (iterFieldData[i] !== undefined) {
