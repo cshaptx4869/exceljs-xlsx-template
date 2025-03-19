@@ -25,6 +25,26 @@ const data = [
       { name: "Project 3", description: "Description 3", image: imageUrl },
     ],
   },
+  {
+    invoice_number: "54548",
+    last_name: "John",
+    first_name: "Doe",
+    phone: "00874****",
+    invoice_date: "15/05/2008",
+    items: [
+      {
+        name: "description",
+        unit_price: 300,
+      },
+      {
+        name: "HTML",
+        unit_price: 400,
+      },
+    ],
+    subtotal: 700,
+    tax: 140,
+    grand_total: 840,
+  },
 ];
 
 async function main() {
@@ -32,25 +52,24 @@ async function main() {
   const workbook = await loadWorkbook(xlsxFile);
   // 填充模板
   await fillTemplate(workbook, data, true);
-  // 遍历每个工作表
-  workbook.eachSheet((worksheet, sheetId) => {
-    if (sheetId === 1) {
+  // 获取工作表
+  const worksheet = workbook.getWorksheet("新报关单");
+  if (worksheet) {
+    // 获取印章占位符位置信息
+    const range = placeholderRange(worksheet, "{{#officialseal}}");
+    if (range) {
       // 将图片添加到工作簿
       const imageId = workbook.addImage({
         filename: officialsealFile,
         extension: "png",
       });
-      // 获取印章占位符位置信息
-      const range = placeholderRange(worksheet, "{{#officialseal}}");
-      if (range) {
-        // 插入图片到表格中
-        worksheet.addImage(imageId, {
-          tl: { col: range.start.col, row: range.start.row - 4 },
-          ext: { width: 200, height: 200 },
-        });
-      }
+      // 插入图片到表格中
+      worksheet.addImage(imageId, {
+        tl: { col: range.start.col, row: range.start.row - 4 },
+        ext: { width: 200, height: 200 },
+      });
     }
-  });
+  }
   // 保存为新的 Excel 文件
   const outputDir = path.join(__dirname, "output");
   !fs.existsSync(outputDir) && fs.mkdirSync(outputDir);

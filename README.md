@@ -65,6 +65,8 @@ declare function placeholderRange(
 import { fillTemplate, loadWorkbook, saveWorkbook, placeholderRange } from "exceljs-xlsx-template";
 
 async function handleXlsxTemplate() {
+  const xlsxFile = "http://127.0.0.1:5500/test/assets/template.xlsx";
+  const officialsealFile = "http://127.0.0.1:5500/test/assets/officialseal.png";
   const imageUrl = "https://s2.loli.net/2025/03/07/ELZY594enrJwF7G.png";
   const data = [
     {
@@ -86,35 +88,54 @@ async function handleXlsxTemplate() {
         { name: "Project 3", description: "Description 3", image: imageUrl },
       ],
     },
+    {
+      invoice_number: "54548",
+      last_name: "John",
+      first_name: "Doe",
+      phone: "00874****",
+      invoice_date: "15/05/2008",
+      items: [
+        {
+          name: "description",
+          unit_price: 300,
+        },
+        {
+          name: "HTML",
+          unit_price: 400,
+        },
+      ],
+      subtotal: 700,
+      tax: 140,
+      grand_total: 840,
+    },
   ];
   // 加载Excel文件
-  const workbook = await loadWorkbook("http://example.com/test/assets/template.xlsx");
+  const workbook = await loadWorkbook(xlsxFile);
   // 填充模板
   await fillTemplate(workbook, data, true);
-  // 加载印章图片
-  const officialsealResponse = await fetch(imageUrl);
-  if (!officialsealResponse.ok)
-    throw new Error(`Failed to download image file, status code: ${officialsealResponse.status}`);
-  const officialsealArrayBuffer = await officialsealResponse.arrayBuffer();
-  // 遍历每个工作表
-  workbook.eachSheet((worksheet, sheetId) => {
-    if (sheetId === 1) {
+  // 获取工作表
+  const worksheet = workbook.getWorksheet("新报关单");
+  if (worksheet) {
+    // 获取印章占位符位置信息
+    const range = placeholderRange(worksheet, "{{#officialseal}}");
+    if (range) {
+      // 加载图片印章
+      const officialsealRresponse = await fetch(officialsealFile);
+      if (!officialsealRresponse.ok)
+        throw new Error(`Failed to download image file, status code: ${officialsealRresponse.status}`);
+      const officialsealArrayBuffer = await officialsealRresponse.arrayBuffer();
       // 将图片添加到工作簿
       const imageId = workbook.addImage({
         buffer: officialsealArrayBuffer,
         extension: "png",
       });
-      // 获取印章占位符位置信息
-      const range = placeholderRange(worksheet, "{{#officialseal}}");
-      if (range) {
-        // 插入图片到表格中
-        worksheet.addImage(imageId, {
-          tl: { col: range.start.col, row: range.start.row - 4 },
-          ext: { width: 200, height: 200 },
-        });
-      }
+      // 插入图片到表格中
+      worksheet.addImage(imageId, {
+        tl: { col: range.start.col, row: range.start.row - 4 },
+        ext: { width: 200, height: 200 },
+      });
     }
-  });
+  }
   // 保存为新的 Excel 文件
   await saveWorkbook(workbook, `${Date.now()}.xlsx`);
 }
@@ -151,6 +172,26 @@ const data = [
       { name: "Project 3", description: "Description 3", image: imageUrl },
     ],
   },
+  {
+    invoice_number: "54548",
+    last_name: "John",
+    first_name: "Doe",
+    phone: "00874****",
+    invoice_date: "15/05/2008",
+    items: [
+      {
+        name: "description",
+        unit_price: 300,
+      },
+      {
+        name: "HTML",
+        unit_price: 400,
+      },
+    ],
+    subtotal: 700,
+    tax: 140,
+    grand_total: 840,
+  },
 ];
 
 async function main() {
@@ -158,25 +199,24 @@ async function main() {
   const workbook = await loadWorkbook(xlsxFile);
   // 填充模板
   await fillTemplate(workbook, data, true);
-  // 遍历每个工作表
-  workbook.eachSheet((worksheet, sheetId) => {
-    if (sheetId === 1) {
-      // 将图片添加到工作簿
-      const imageId = workbook.addImage({
-        filename: officialsealFile,
-        extension: "png",
+  // 获取工作表
+  const worksheet = workbook.getWorksheet("新报关单");
+  if (worksheet) {
+    // 将图片添加到工作簿
+    const imageId = workbook.addImage({
+      filename: officialsealFile,
+      extension: "png",
+    });
+    // 获取印章占位符位置信息
+    const range = placeholderRange(worksheet, "{{#officialseal}}");
+    if (range) {
+      // 插入图片到表格中
+      worksheet.addImage(imageId, {
+        tl: { col: range.start.col, row: range.start.row - 4 },
+        ext: { width: 200, height: 200 },
       });
-      // 获取印章占位符位置信息
-      const range = placeholderRange(worksheet, "{{#officialseal}}");
-      if (range) {
-        // 插入图片到表格中
-        worksheet.addImage(imageId, {
-          tl: { col: range.start.col, row: range.start.row - 4 },
-          ext: { width: 200, height: 200 },
-        });
-      }
     }
-  });
+  }
   // 保存为新的 Excel 文件
   const outputDir = path.join(__dirname, "output");
   !fs.existsSync(outputDir) && fs.mkdirSync(outputDir);

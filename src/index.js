@@ -51,8 +51,6 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
   let sheetIndex = 0;
   // 工作表待合并单元格信息
   const sheetDynamicMerges = {};
-  const fieldRegex = /{{(\w+)}}/;
-  const iterationRegex = /{{(\w+)\.\w+}}/;
   // NOTE 工作簿的sheetId是按工作表创建的顺序从1开始递增
   workbook.eachSheet((worksheet, sheetId) => {
     const worksheetData = workbookData[sheetIndex];
@@ -63,16 +61,27 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
       worksheet.eachRow((row, rowNumber) => {
         const iterFieldNames = [];
         row.eachCell((cell, colNumber) => {
-          if (typeof cell.value === "string") {
-            if (cell.value.match(fieldRegex)) {
-              // 替换单字段占位符
-              const fieldName = cell.value.match(fieldRegex)[1];
-              if (fieldName in worksheetData && typeof worksheetData[fieldName] !== "object") {
-                cell.value = cell.value.replace(new RegExp(`{{${fieldName}}}`, "g"), worksheetData[fieldName]);
-              }
-            } else if (cell.value.match(iterationRegex)) {
-              // 迭代标签信息搜集
-              const iterFieldName = cell.value.match(iterationRegex)[1];
+          const cellType = cell.type;
+          // 字符串值
+          if (cellType === ExcelJS.ValueType.String) {
+            // 替换单标签占位符
+            if (/{{\w+}}/.test(cell.value)) {
+              // 允许一个单元格中有多个单标签占位符
+              const placeholders = cell.value.match(/{{\w+}}/g);
+              placeholders.forEach((placeholder) => {
+                const fieldName = placeholder.slice(2, -2);
+                if (fieldName in worksheetData && typeof worksheetData[fieldName] !== "object") {
+                  if (cell.value.length === placeholder.length) {
+                    cell.value = worksheetData[fieldName];
+                  } else {
+                    cell.value = cell.value.replace(placeholder, worksheetData[fieldName]);
+                  }
+                }
+              });
+            }
+            // 迭代标签信息搜集
+            else if (/{{\w+\.\w+}}/.test(cell.value)) {
+              const iterFieldName = cell.value.match(/{{(\w+)\.\w+}}/)[1];
               if (
                 iterFieldName in worksheetData &&
                 Array.isArray(worksheetData[iterFieldName]) &&
@@ -92,6 +101,48 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
                 }
               }
             }
+          }
+          // 富文本值
+          else if (cellType === ExcelJS.ValueType.RichText) {
+            cell.value.richText.forEach((item) => {
+              // 替换单标签占位符
+              if (/{{\w+}}/.test(item.text)) {
+                // 允许一个单元格中有多个单标签占位符
+                const placeholders = item.text.match(/{{(\w+)}}/g);
+                placeholders.forEach((placeholder) => {
+                  const fieldName = placeholder.slice(2, -2);
+                  if (fieldName in worksheetData && typeof worksheetData[fieldName] !== "object") {
+                    if (item.text.length === placeholder.length) {
+                      item.text = worksheetData[fieldName];
+                    } else {
+                      item.text = item.text.replace(placeholder, worksheetData[fieldName]);
+                    }
+                  }
+                });
+              }
+              // 迭代标签信息搜集
+              else if (/{{\w+\.\w+}}/.test(item.text)) {
+                const iterFieldName = item.text.match(/{{(\w+)\.\w+}}/)[1];
+                if (
+                  iterFieldName in worksheetData &&
+                  Array.isArray(worksheetData[iterFieldName]) &&
+                  worksheetData[iterFieldName].length > 0
+                ) {
+                  if (iterFieldNames.length === 0) {
+                    iterFieldNames.push(iterFieldName);
+                    iterationTags.push({ iterStartRow: rowNumber, iterFieldNames, iterFieldName });
+                  } else {
+                    if (!iterFieldNames.includes(iterFieldName)) {
+                      iterFieldNames.push(iterFieldName);
+                      const lastIterationTag = iterationTags[iterationTags.length - 1];
+                      if (worksheetData[iterFieldName].length > worksheetData[lastIterationTag.iterFieldName].length) {
+                        lastIterationTag.iterFieldName = iterFieldName;
+                      }
+                    }
+                  }
+                }
+              }
+            });
           }
         });
       });
@@ -144,11 +195,13 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
                 if (cell.value.includes(`{{${iterField}\.`)) {
                   if (iterFieldData[i] !== undefined) {
                     for (const key in iterFieldData[i]) {
-                      if (cell.value.includes(`{{${iterField}.${key}}}`)) {
-                        cell.value = cell.value.replace(
-                          new RegExp(`{{${iterField}.${key}}}`, "g"),
-                          iterFieldData[i][key]
-                        );
+                      const placeholder = `{{${iterField}.${key}}}`;
+                      if (cell.value.includes(placeholder)) {
+                        if (cell.value.length === placeholder.length) {
+                          cell.value = iterFieldData[i][key];
+                        } else {
+                          cell.value = cell.value.replace(new RegExp(placeholder, "g"), iterFieldData[i][key]);
+                        }
                       }
                     }
                   } else {
