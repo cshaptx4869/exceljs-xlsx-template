@@ -1,9 +1,7 @@
 "use strict";
 
 const ExcelJS = require("exceljs");
-
-// 是否在浏览器环境
-const isBrowser = typeof window !== "undefined" && typeof document !== "undefined";
+const { isBrowser, fetchUrlFile } = require("./helpers.js");
 
 /**
  * 加载工作簿
@@ -50,199 +48,130 @@ async function loadWorkbook(input) {
  */
 async function fillTemplate(workbook, workbookData, parseImage = false) {
   // 第一步：复制行并替换占位符
-  let sheetIndex = 0;
   // 工作表待合并单元格信息
   const sheetDynamicMerges = {};
   // NOTE 工作簿的sheetId是按工作表创建的顺序从1开始递增
+  let sheetIndex = 0;
   workbook.eachSheet((worksheet, sheetId) => {
-    const worksheetData = workbookData[sheetIndex];
-    sheetIndex++;
-    if (worksheetData && typeof worksheetData === "object") {
-      // 单标签替换和迭代标签信息收集
-      const iterationTags = [];
-      worksheet.eachRow((row, rowNumber) => {
-        const iterFieldNames = [];
-        row.eachCell((cell, colNumber) => {
-          const cellType = cell.type;
+    const sheetData = workbookData[sheetIndex++];
+    if (!(sheetData && typeof sheetData === "object" && !Array.isArray(sheetData))) {
+      return;
+    }
+    // 单标签替换和迭代标签信息收集
+    const sheetIterTags = [];
+    worksheet.eachRow((row, rowNumber) => {
+      // 行迭代字段
+      const rowIterFields = [];
+      row.eachCell((cell, colNumber) => {
+        const cellType = cell.type;
+        // 字符串值
+        if (cellType === ExcelJS.ValueType.String) {
+          cell.value = processCellTags(cell.value, sheetData, sheetIterTags, rowIterFields, rowNumber);
+        }
+        // 富文本值
+        else if (cellType === ExcelJS.ValueType.RichText) {
+          cell.value.richText.forEach((item) => {
+            item.text = processCellTags(item.text, sheetData, sheetIterTags, rowIterFields, rowNumber);
+          });
+        }
+      });
+    });
+    // 迭代标签处理
+    if (sheetIterTags.length === 0) {
+      return;
+    }
+    // 合并单元格信息
+    // NOTE 合并信息是静态的，不会随着行增加而实时更新
+    const sheetMerges = sheetMergeInfo(worksheet);
+    // 迭代行并替换迭代字段占位符
+    let iterOffset = 0;
+    sheetIterTags.forEach(({ iterStartRow, iterFieldNames, iterFieldName }, iterTagIndex) => {
+      // 调整后的起始行
+      const adjustedStartRow = iterStartRow + iterOffset;
+      // 多行的情况下，需要复制多行
+      if (sheetData[iterFieldName].length > 1) {
+        // 一次性复制多行
+        // NOTE 复制的行不会复制合并信息
+        worksheet.duplicateRow(adjustedStartRow, sheetData[iterFieldName].length - 1, true);
+        // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
+        const merges = sheetMerges.filter((merge) => {
+          return merge.start.row <= iterStartRow && merge.end.row >= iterStartRow;
+        });
+        if (merges.length > 0) {
+          if (!sheetDynamicMerges[sheetId]) {
+            sheetDynamicMerges[sheetId] = [];
+          }
+          // NOTE 在浏览器环境，动态增加的行会使其后面的行取消合并单元格
+          const startFixIndex = isBrowser ? (iterTagIndex === 0 ? 1 : 0) : 1;
+          for (let i = startFixIndex; i < sheetData[iterFieldName].length; i++) {
+            for (const merge of merges) {
+              sheetDynamicMerges[sheetId].push([
+                merge.start.row + i + iterOffset,
+                merge.start.col,
+                merge.end.row + i + iterOffset,
+                merge.end.col,
+              ]);
+            }
+          }
+        }
+      }
+      // 替换迭代行中的占位符
+      for (let i = 0; i < sheetData[iterFieldName].length; i++) {
+        const currentRow = worksheet.getRow(adjustedStartRow + i);
+        currentRow.eachCell((cell, colNumber) => {
           // 字符串值
-          if (cellType === ExcelJS.ValueType.String) {
-            // 替换单标签占位符
-            if (/{{\w+}}/.test(cell.value)) {
-              // 允许一个单元格中有多个单标签占位符
-              const placeholders = cell.value.match(/{{\w+}}/g);
-              placeholders.forEach((placeholder) => {
-                const fieldName = placeholder.slice(2, -2);
-                if (fieldName in worksheetData && typeof worksheetData[fieldName] !== "object") {
-                  if (cell.value.length === placeholder.length) {
-                    cell.value = worksheetData[fieldName];
-                  } else {
-                    cell.value = cell.value.replace(placeholder, worksheetData[fieldName]);
+          if (cell.type === ExcelJS.ValueType.String) {
+            for (const iterField of iterFieldNames) {
+              const iterFieldData = sheetData[iterField];
+              if (cell.value.includes(`{{${iterField}\.`)) {
+                if (iterFieldData[i] !== undefined) {
+                  for (const key in iterFieldData[i]) {
+                    const placeholder = `{{${iterField}.${key}}}`;
+                    if (cell.value.includes(placeholder)) {
+                      if (cell.value.length === placeholder.length) {
+                        cell.value = iterFieldData[i][key];
+                      } else {
+                        cell.value = cell.value.replace(new RegExp(placeholder, "g"), iterFieldData[i][key]);
+                      }
+                    }
                   }
-                }
-              });
-            }
-            // 迭代标签信息搜集
-            else if (/{{\w+\.\w+}}/.test(cell.value)) {
-              const iterFieldName = cell.value.match(/{{(\w+)\.\w+}}/)[1];
-              if (
-                iterFieldName in worksheetData &&
-                Array.isArray(worksheetData[iterFieldName]) &&
-                worksheetData[iterFieldName].length > 0
-              ) {
-                if (iterFieldNames.length === 0) {
-                  iterFieldNames.push(iterFieldName);
-                  iterationTags.push({ iterStartRow: rowNumber, iterFieldNames, iterFieldName });
                 } else {
-                  if (!iterFieldNames.includes(iterFieldName)) {
-                    iterFieldNames.push(iterFieldName);
-                    const lastIterationTag = iterationTags[iterationTags.length - 1];
-                    if (worksheetData[iterFieldName].length > worksheetData[lastIterationTag.iterFieldName].length) {
-                      lastIterationTag.iterFieldName = iterFieldName;
-                    }
-                  }
+                  cell.value = null;
                 }
               }
             }
           }
-          // 富文本值
-          else if (cellType === ExcelJS.ValueType.RichText) {
-            cell.value.richText.forEach((item) => {
-              // 替换单标签占位符
-              if (/{{\w+}}/.test(item.text)) {
-                // 允许一个单元格中有多个单标签占位符
-                const placeholders = item.text.match(/{{(\w+)}}/g);
-                placeholders.forEach((placeholder) => {
-                  const fieldName = placeholder.slice(2, -2);
-                  if (fieldName in worksheetData && typeof worksheetData[fieldName] !== "object") {
-                    if (item.text.length === placeholder.length) {
-                      item.text = worksheetData[fieldName];
-                    } else {
-                      item.text = item.text.replace(placeholder, worksheetData[fieldName]);
-                    }
-                  }
-                });
-              }
-              // 迭代标签信息搜集
-              else if (/{{\w+\.\w+}}/.test(item.text)) {
-                const iterFieldName = item.text.match(/{{(\w+)\.\w+}}/)[1];
-                if (
-                  iterFieldName in worksheetData &&
-                  Array.isArray(worksheetData[iterFieldName]) &&
-                  worksheetData[iterFieldName].length > 0
-                ) {
-                  if (iterFieldNames.length === 0) {
-                    iterFieldNames.push(iterFieldName);
-                    iterationTags.push({ iterStartRow: rowNumber, iterFieldNames, iterFieldName });
-                  } else {
-                    if (!iterFieldNames.includes(iterFieldName)) {
-                      iterFieldNames.push(iterFieldName);
-                      const lastIterationTag = iterationTags[iterationTags.length - 1];
-                      if (worksheetData[iterFieldName].length > worksheetData[lastIterationTag.iterFieldName].length) {
-                        lastIterationTag.iterFieldName = iterFieldName;
-                      }
-                    }
-                  }
-                }
-              }
-            });
-          }
-        });
-      });
-      // 迭代标签处理
-      if (iterationTags.length === 0) {
-        return;
-      }
-      // 合并单元格信息
-      // NOTE 合并信息是静态的，不会随着行增加而实时更新
-      const originMerges = sheetMergeInfo(worksheet);
-      // 迭代行并替换迭代字段占位符
-      let iterOffset = 0;
-      iterationTags.forEach(({ iterStartRow, iterFieldNames, iterFieldName }, iterationTagIndex) => {
-        // 调整后的起始行
-        const adjustedStartRow = iterStartRow + iterOffset;
-        // 多行的情况下，需要复制多行
-        if (worksheetData[iterFieldName].length > 1) {
-          // 一次性复制多行
-          // NOTE 复制的行不会复制合并信息
-          worksheet.duplicateRow(adjustedStartRow, worksheetData[iterFieldName].length - 1, true);
-          // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
-          const merges = originMerges.filter((merge) => {
-            return merge.start.row <= iterStartRow && merge.end.row >= iterStartRow;
-          });
-          if (merges.length > 0) {
-            if (!sheetDynamicMerges[sheetId]) {
-              sheetDynamicMerges[sheetId] = [];
-            }
-            // NOTE 在浏览器环境，动态增加的行会使其后面的行取消合并单元格
-            const startFixIndex = isBrowser ? (iterationTagIndex === 0 ? 1 : 0) : 1;
-            for (let i = startFixIndex; i < worksheetData[iterFieldName].length; i++) {
-              for (const merge of merges) {
-                sheetDynamicMerges[sheetId].push([
-                  merge.start.row + i + iterOffset,
-                  merge.start.col,
-                  merge.end.row + i + iterOffset,
-                  merge.end.col,
-                ]);
-              }
-            }
-          }
-        }
-        // 替换迭代行中的占位符
-        for (let i = 0; i < worksheetData[iterFieldName].length; i++) {
-          const currentRow = worksheet.getRow(adjustedStartRow + i);
-          currentRow.eachCell((cell, colNumber) => {
-            if (typeof cell.value === "string") {
-              for (const iterField of iterFieldNames) {
-                const iterFieldData = worksheetData[iterField];
-                if (cell.value.includes(`{{${iterField}\.`)) {
-                  if (iterFieldData[i] !== undefined) {
-                    for (const key in iterFieldData[i]) {
-                      const placeholder = `{{${iterField}.${key}}}`;
-                      if (cell.value.includes(placeholder)) {
-                        if (cell.value.length === placeholder.length) {
-                          cell.value = iterFieldData[i][key];
-                        } else {
-                          cell.value = cell.value.replace(new RegExp(placeholder, "g"), iterFieldData[i][key]);
-                        }
-                      }
-                    }
-                  } else {
-                    cell.value = null;
-                  }
-                }
-              }
-            }
-          });
-        }
-        // 更新行号偏移量
-        iterOffset += worksheetData[iterFieldName].length - 1;
-      });
-      // 修正浏览器环境下，迭代行之后的合并单元格信息
-      if (isBrowser) {
-        const iterRows = iterationTags.map(({ iterStartRow }) => iterStartRow);
-        originMerges.forEach((merge) => {
-          // 迭代后的偏移行
-          let mergeOffset = 0;
-          iterationTags.forEach(({ iterStartRow, iterFieldName }) => {
-            if (Array.isArray(worksheetData[iterFieldName])) {
-              if (!iterRows.includes(merge.start.row) && merge.start.row > iterStartRow) {
-                mergeOffset += worksheetData[iterFieldName].length - 1;
-              }
-            }
-          });
-          if (mergeOffset) {
-            if (!sheetDynamicMerges[sheetId]) {
-              sheetDynamicMerges[sheetId] = [];
-            }
-            sheetDynamicMerges[sheetId].push([
-              merge.start.row + mergeOffset,
-              merge.start.col,
-              merge.end.row + mergeOffset,
-              merge.end.col,
-            ]);
-          }
+          // TODO 迭代标签单元格为富文本值
         });
       }
+      // 更新行号偏移量
+      iterOffset += sheetData[iterFieldName].length - 1;
+    });
+    // 修正在浏览器环境，动态增加的行会使其后面的行取消合并单元格
+    if (isBrowser) {
+      const iterRows = sheetIterTags.map(({ iterStartRow }) => iterStartRow);
+      sheetMerges.forEach((merge) => {
+        // 迭代后的偏移行
+        let mergeOffset = 0;
+        sheetIterTags.forEach(({ iterStartRow, iterFieldName }) => {
+          if (Array.isArray(sheetData[iterFieldName])) {
+            if (!iterRows.includes(merge.start.row) && merge.start.row > iterStartRow) {
+              mergeOffset += sheetData[iterFieldName].length - 1;
+            }
+          }
+        });
+        if (mergeOffset) {
+          if (!sheetDynamicMerges[sheetId]) {
+            sheetDynamicMerges[sheetId] = [];
+          }
+          sheetDynamicMerges[sheetId].push([
+            merge.start.row + mergeOffset,
+            merge.start.col,
+            merge.end.row + mergeOffset,
+            merge.end.col,
+          ]);
+        }
+      });
     }
   });
 
@@ -301,7 +230,7 @@ async function saveWorkbook(workbook, output) {
  */
 function placeholderRange(worksheet, placeholder = "{{#placeholder}}", clearMatch = true) {
   let result = null;
-  const originMerges = sheetMergeInfo(worksheet);
+  const sheetMerges = sheetMergeInfo(worksheet);
   // 遍历每一行
   outer: for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber++) {
     const row = worksheet.getRow(rowNumber);
@@ -310,7 +239,7 @@ function placeholderRange(worksheet, placeholder = "{{#placeholder}}", clearMatc
       const cell = row.getCell(colNumber);
       // 单元格值中是否包含占位符
       if (typeof cell.value === "string" && cell.value.includes(`${placeholder}`)) {
-        const info = originMerges.find((merge) => {
+        const info = sheetMerges.find((merge) => {
           return merge.start.row === rowNumber && merge.start.col === colNumber;
         });
         result = info ?? {
@@ -330,6 +259,58 @@ function placeholderRange(worksheet, placeholder = "{{#placeholder}}", clearMatc
 }
 
 /**
+ * 处理单元格标签(单标签替换和迭代标签信息收集)
+ * @param {string} target
+ * @param {Record<string, any>} worksheetData
+ * @param {Array<{iterStartRow: number, iterFieldNames: string[], iterFieldName: string}>} iterationTags
+ * @param {string[]} iterFieldNames
+ * @param {number} rowNumber
+ * @returns {string}
+ */
+function processCellTags(target, worksheetData, iterationTags, iterFieldNames, rowNumber) {
+  // 单标签占位符替换
+  if (/{{\w+}}/.test(target)) {
+    // 允许单元格中有多个单标签占位符
+    const placeholders = target.match(/{{\w+}}/g);
+    placeholders.forEach((placeholder) => {
+      const fieldName = placeholder.slice(2, -2);
+      if (fieldName in worksheetData) {
+        if (target.length === placeholder.length && typeof worksheetData[fieldName] !== "object") {
+          target = worksheetData[fieldName];
+        } else {
+          target = target.replace(placeholder, worksheetData[fieldName]);
+        }
+      }
+    });
+  }
+  // 迭代标签信息搜集
+  else if (/{{\w+\.\w+}}/.test(target)) {
+    // TODO 单元格含多个迭代标签
+    // 单元格中仅匹配一个迭代标签占位符
+    const iterFieldName = target.match(/{{(\w+)\.\w+}}/)[1];
+    if (
+      iterFieldName in worksheetData &&
+      Array.isArray(worksheetData[iterFieldName]) &&
+      worksheetData[iterFieldName].length > 0
+    ) {
+      if (iterFieldNames.length === 0) {
+        iterFieldNames.push(iterFieldName);
+        iterationTags.push({ iterStartRow: rowNumber, iterFieldNames: iterFieldNames, iterFieldName: iterFieldName });
+      } else {
+        if (!iterFieldNames.includes(iterFieldName)) {
+          iterFieldNames.push(iterFieldName);
+          const lastIterationTag = iterationTags[iterationTags.length - 1];
+          if (worksheetData[iterFieldName].length > worksheetData[lastIterationTag.iterFieldName].length) {
+            lastIterationTag.iterFieldName = iterFieldName;
+          }
+        }
+      }
+    }
+  }
+  return target;
+}
+
+/**
  * 获取工作表合并信息
  * @param {ExcelJS.Worksheet} worksheet
  * @returns {Array<{start: {row: number, col: number}, end: {row: number, col: number}}>}
@@ -346,38 +327,6 @@ function sheetMergeInfo(worksheet) {
 }
 
 /**
- * 获取url文件
- * @param {string} url
- * @returns {Promise<Blob|Buffer>}
- */
-async function fetchUrlFile(url) {
-  if (isBrowser) {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${url}, status code: ${response.status}`);
-      }
-      return response.blob();
-    } catch (error) {
-      throw new Error(`Error fetching ${url}: ${error.message}`);
-    }
-  } else {
-    const { get } = /^https:\/\//.test(url) ? require("https") : require("http");
-    return new Promise((resolve, reject) => {
-      get(url, (response) => {
-        if (response.statusCode !== 200) {
-          reject(new Error(`Failed to fetch ${url}, status code: ${response.statusCode}`));
-          return;
-        }
-        const chunks = [];
-        response.on("data", (chunk) => chunks.push(chunk));
-        response.on("end", () => resolve(Buffer.concat(chunks)));
-      }).on("error", (err) => reject(err));
-    });
-  }
-}
-
-/**
  * 填充图片
  * @param {ExcelJS.Workbook} workbook
  */
@@ -389,7 +338,7 @@ async function fillImage(workbook) {
   // 遍历每个工作表
   for (let i = 0; i < workbook.worksheets.length; i++) {
     const worksheet = workbook.worksheets[i];
-    const originMerges = sheetMergeInfo(worksheet);
+    const sheetMerges = sheetMergeInfo(worksheet);
     // 遍历每一行
     for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber++) {
       const row = worksheet.getRow(rowNumber);
@@ -421,7 +370,7 @@ async function fillImage(workbook) {
             });
           }
           // 将图片添加到工作表中
-          const merge = originMerges.find((merge) => {
+          const merge = sheetMerges.find((merge) => {
             return merge.start.row === rowNumber && merge.start.col === colNumber;
           });
           // 坐标系基于零，A1 的左上角将为 {col：0，row：0}，右下角为 {col：1，row：1}
