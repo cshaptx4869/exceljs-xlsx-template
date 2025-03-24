@@ -57,7 +57,7 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
     if (!(sheetData && typeof sheetData === "object" && !Array.isArray(sheetData))) {
       return;
     }
-    // 单标签替换和迭代标签信息收集
+    // 普通标签替换和迭代标签信息收集
     const sheetIterTags = [];
     worksheet.eachRow((row, rowNumber) => {
       // 行迭代字段
@@ -123,15 +123,16 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
           if (cell.type === ExcelJS.ValueType.String) {
             for (const iterField of iterFieldNames) {
               const iterFieldData = sheetData[iterField];
-              if (cell.value.includes(`{{${iterField}\.`)) {
+              if (cell.value.includes(`{{@@${iterField}\.`)) {
                 if (iterFieldData[i] !== undefined) {
+                  // 迭代字段数据
                   for (const key in iterFieldData[i]) {
-                    const placeholder = `{{${iterField}.${key}}}`;
+                    const placeholder = `{{@@${iterField}.${key}}}`;
                     if (cell.value.includes(placeholder)) {
-                      if (cell.value.length === placeholder.length) {
+                      if (cell.value.length === placeholder.length && typeof iterFieldData[i][key] !== "object") {
                         cell.value = iterFieldData[i][key];
                       } else {
-                        cell.value = cell.value.replace(new RegExp(placeholder, "g"), iterFieldData[i][key]);
+                        cell.value = cell.value.replace(new RegExp(placeholder, "g"), iterFieldData[i][key] ?? "");
                       }
                     }
                   }
@@ -259,7 +260,7 @@ function placeholderRange(worksheet, placeholder = "{{#placeholder}}", clearMatc
 }
 
 /**
- * 处理单元格标签(单标签替换和迭代标签信息收集)
+ * 处理单元格标签(普通标签替换和迭代标签信息收集)
  * @param {string} target
  * @param {Record<string, any>} worksheetData
  * @param {Array<{iterStartRow: number, iterFieldNames: string[], iterFieldName: string}>} iterationTags
@@ -268,26 +269,37 @@ function placeholderRange(worksheet, placeholder = "{{#placeholder}}", clearMatc
  * @returns {string}
  */
 function processCellTags(target, worksheetData, iterationTags, iterFieldNames, rowNumber) {
-  // 单标签占位符替换
-  if (/{{\w+}}/.test(target)) {
-    // 允许单元格中有多个单标签占位符
-    const placeholders = target.match(/{{\w+}}/g);
+  // 普通标签占位符替换
+  if (/{{\w+(\.\w+)*}}/.test(target)) {
+    // 允许单元格中有多个普通标签占位符
+    const placeholders = target.match(/{{\w+(\.\w+)*}}/g);
     placeholders.forEach((placeholder) => {
-      const fieldName = placeholder.slice(2, -2);
-      if (fieldName in worksheetData) {
-        if (target.length === placeholder.length && typeof worksheetData[fieldName] !== "object") {
-          target = worksheetData[fieldName];
+      const fields = placeholder.slice(2, -2).split(".");
+      let value = worksheetData;
+      let isMatched = true;
+      for (let i = 0; i < fields.length; i++) {
+        if (fields[i] in value) {
+          value = value[fields[i]];
         } else {
-          target = target.replace(placeholder, worksheetData[fieldName]);
+          isMatched = false;
+          break;
+        }
+      }
+      // 数据匹配成功
+      if (isMatched) {
+        if (target.length === placeholder.length && typeof value !== "object") {
+          target = value;
+        } else {
+          target = target.replace(placeholder, value ?? "");
         }
       }
     });
   }
   // 迭代标签信息搜集
-  else if (/{{\w+\.\w+}}/.test(target)) {
+  else if (/{{@@\w+\.\w+}}/.test(target)) {
     // TODO 单元格含多个迭代标签
     // 单元格中仅匹配一个迭代标签占位符
-    const iterFieldName = target.match(/{{(\w+)\.\w+}}/)[1];
+    const iterFieldName = target.match(/{{@@(\w+)\.\w+}}/)[1];
     if (
       iterFieldName in worksheetData &&
       Array.isArray(worksheetData[iterFieldName]) &&
