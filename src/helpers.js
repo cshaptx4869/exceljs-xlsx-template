@@ -1,3 +1,5 @@
+"use strict";
+
 // 是否在浏览器环境
 const isBrowser = typeof window !== "undefined" && typeof document !== "undefined";
 

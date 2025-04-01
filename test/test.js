@@ -1,6 +1,5 @@
 const path = require("path");
-const fs = require("fs");
-const { fillTemplate, loadWorkbook, saveWorkbook, placeholderRange } = require("../src/index.js");
+const { renderXlsxTemplate, placeholderRange } = require("../src/index.js");
 
 const xlsxFile = path.join(__dirname, "assets", "template.xlsx");
 const officialsealFile = path.join(__dirname, "assets", "officialseal.png");
@@ -46,41 +45,34 @@ const data = [
     grand_total: 840,
   },
 ];
+const output = path.join(__dirname, "output", `${Date.now()}.xlsx`);
 
-async function main() {
-  // 加载Excel文件
-  const workbook = await loadWorkbook(xlsxFile);
-  // 填充模板
-  await fillTemplate(workbook, data, true);
-  // 获取工作表
-  const worksheet = workbook.getWorksheet("新报关单");
-  if (worksheet) {
-    // 获取印章占位符位置信息
-    const range = placeholderRange(worksheet, "{{#officialseal}}");
-    if (range) {
-      // 将图片添加到工作簿
-      const imageId = workbook.addImage({
-        filename: officialsealFile,
-        extension: "png",
-      });
-      // 插入图片到表格中
-      worksheet.addImage(imageId, {
-        tl: { col: range.start.col, row: range.start.row - 4 },
-        ext: { width: 200, height: 200 },
-      });
+// 渲染Xlsx模板
+renderXlsxTemplate(xlsxFile, data, output, {
+  parseImage: true,
+  beforeSave(workbook) {
+    // 获取工作表
+    const worksheet = workbook.getWorksheet("新报关单");
+    if (worksheet) {
+      // 获取印章占位符位置信息
+      const range = placeholderRange(worksheet, "{{#officialseal}}");
+      if (range) {
+        // 将图片添加到工作簿
+        const imageId = workbook.addImage({
+          filename: officialsealFile,
+          extension: "png",
+        });
+        // 插入图片到表格中
+        worksheet.addImage(imageId, {
+          tl: { col: range.start.col, row: range.start.row - 4 },
+          ext: { width: 200, height: 200 },
+        });
+      }
     }
-  }
-  // 保存为新的 Excel 文件
-  const outputDir = path.join(__dirname, "output");
-  !fs.existsSync(outputDir) && fs.mkdirSync(outputDir);
-  const output = path.join(outputDir, `${Date.now()}.xlsx`);
-  await saveWorkbook(workbook, output);
-  return output;
-}
-
-main()
-  .then((res) => {
-    console.log("🚀 ~ output:", res);
+  },
+})
+  .then(() => {
+    console.log("🚀 ~ output:", output);
   })
   .catch((error) => {
     console.error("Error processing Excel file:", error);

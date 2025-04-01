@@ -12,9 +12,9 @@
     </div>
     <script src="../dist/bundle.js"></script>
     <script>
-      const { loadWorkbook, fillTemplate, saveWorkbook, placeholderRange } = ExceljsXlsxTemplate;
-      const xlsxFile = "./assets/template.xlsx";
-      const officialsealFile = "./assets/officialseal.png";
+      const { renderXlsxTemplate, placeholderRange } = ExceljsXlsxTemplate;
+      const xlsxFile = new URL("./assets/template.xlsx", location.href).toString();
+      const officialsealFile = new URL("./assets/officialseal.png", location.href).toString();
       const imageUrl = "https://s2.loli.net/2025/03/07/ELZY594enrJwF7G.png";
       const data = [
         {
@@ -58,83 +58,53 @@
         },
       ];
 
-      // 读取文件
-      // const fileInput = document.querySelector("input[type=file]");
-      // fileInput.addEventListener("change", (event) => {
-      //   const file = event.target.files[0];
-      //   if (!file) return;
-
-      //   // 使用FileReader对象来读取文件内容
-      //   const reader = new FileReader();
-      //   reader.onload = async (ev) => {
-      //     if (ev.target !== null && ev.target.result !== null) {
-      //       const arrayBuffer = ev.target.result; // 获取 ArrayBuffer
-      //       try {
-      //         const workbook = await loadWorkbook(arrayBuffer);
-      //         await fillTemplate(workbook, data);
-      //         await saveWorkbook(workbook, `${Date.now()}.xlsx`);
-      //       } catch (error) {
-      //         console.error("Error processing Excel file:", error);
-      //       }
-      //     }
-      //   };
-      //   reader.onerror = function () {
-      //     console.error("Error reading Excel file");
-      //   };
-      //   // 读取文件为 ArrayBuffer
-      //   reader.readAsArrayBuffer(file);
-      // });
-
+      // 示例一
       const fileInput = document.querySelector("input[type=file]");
       fileInput.addEventListener("change", async (event) => {
         const file = event.target.files[0];
         if (!file) return;
 
         try {
-          const workbook = await loadWorkbook(file);
-          await fillTemplate(workbook, data);
-          await saveWorkbook(workbook, `${Date.now()}.xlsx`);
+          renderXlsxTemplate(file, data, `${Date.now()}.xlsx`);
         } catch (error) {
           console.error("Error processing Excel file:", error);
         }
       });
 
+      // 示例二
       const button = document.querySelector("button");
-      button.addEventListener("click", async () => {
+      button.addEventListener("click", () => {
         try {
-          // 加载Excel文件
-          // const response = await fetch(input);
-          // if (!response.ok) throw new Error(`Failed to download template file, status code: ${response.status}`);
-          // const arrayBuffer = await response.arrayBuffer();
-          // const workbook = await loadWorkbook(arrayBuffer);
-          const workbook = await loadWorkbook(new URL(xlsxFile, location.href).toString());
-          // 填充模板
-          await fillTemplate(workbook, data, true);
-          // 获取工作表
-          const worksheet = workbook.getWorksheet("新报关单");
-          if (worksheet) {
-            // 获取印章占位符位置信息
-            const range = placeholderRange(worksheet, "{{#officialseal}}");
-            if (range) {
-              // 加载图片印章
-              const officialsealRresponse = await fetch(new URL(officialsealFile, location.href).toString());
-              if (!officialsealRresponse.ok)
-                throw new Error(`Failed to download image file, status code: ${officialsealRresponse.status}`);
-              const officialsealArrayBuffer = await officialsealRresponse.arrayBuffer();
-              // 将图片添加到工作簿
-              const imageId = workbook.addImage({
-                buffer: officialsealArrayBuffer,
-                extension: "png",
-              });
-              // 插入图片到表格中
-              worksheet.addImage(imageId, {
-                tl: { col: range.start.col, row: range.start.row - 4 },
-                ext: { width: 200, height: 200 },
-              });
-            }
-          }
-          // 保存为新的 Excel 文件
-          await saveWorkbook(workbook, `${Date.now()}.xlsx`);
+          renderXlsxTemplate(xlsxFile, data, `${Date.now()}.xlsx`, {
+            parseImage: true,
+            async beforeSave(workbook) {
+              // 获取工作表
+              const worksheet = workbook.getWorksheet("新报关单");
+              if (worksheet) {
+                // 获取印章占位符位置信息
+                const range = placeholderRange(worksheet, "{{#officialseal}}");
+                if (range) {
+                  // 加载图片印章
+                  const officialsealRresponse = await fetch(officialsealFile);
+                  if (!officialsealRresponse.ok) {
+                    console.error(`Failed to download image file, status code: ${officialsealRresponse.status}`);
+                    return;
+                  }
+                  const officialsealArrayBuffer = await officialsealRresponse.arrayBuffer();
+                  // 将图片添加到工作簿
+                  const imageId = workbook.addImage({
+                    buffer: officialsealArrayBuffer,
+                    extension: "png",
+                  });
+                  // 插入图片到表格中
+                  worksheet.addImage(imageId, {
+                    tl: { col: range.start.col, row: range.start.row - 4 },
+                    ext: { width: 200, height: 200 },
+                  });
+                }
+              }
+            },
+          });
         } catch (error) {
           console.error("Error processing Excel file:", error);
         }
