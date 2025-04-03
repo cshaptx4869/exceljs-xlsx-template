@@ -343,9 +343,10 @@ function sheetMergeInfo(worksheet) {
  * @param {ExcelJS.Workbook} workbook
  */
 async function fillImage(workbook) {
-  const workbookImage = {};
-  const invalidImages = [];
-  const imageRegex = /https?:\/\/[^\s]+?\.(jpe?g|gif|png)/i;
+  const filledImageMap = new Map();
+  const invalidImageSet = new Set();
+  const urlRegex = /https?:\/\/[^\s]+(?:\.(jpe?g|png|gif))?/i;
+  const base64Regex = /data:image\/(jpeg|gif|png);base64,[^\s]+/i;
   // NOTE eachSheet、eachRow、eachCell都是同步方法，不会等待异步操作完成
   // 遍历每个工作表
   for (let i = 0; i < workbook.worksheets.length; i++) {
@@ -357,50 +358,77 @@ async function fillImage(workbook) {
       // 遍历每个单元格
       for (let colNumber = 1; colNumber <= row.cellCount; colNumber++) {
         const cell = row.getCell(colNumber);
-        // 检查单元格的值是否是图片地址
-        if (typeof cell.value === "string" && cell.value.match(imageRegex)) {
-          const matches = cell.value.match(imageRegex);
+        if (typeof cell.value !== "string") {
+          continue;
+        }
+        let targetRegex = null;
+        let imageId = 0;
+        // URL图片
+        if (urlRegex.test(cell.value)) {
+          targetRegex = urlRegex;
+          const matches = cell.value.match(urlRegex);
           const imageUrl = matches[0];
-          const imageExt = matches[1];
-          if (invalidImages.includes(imageUrl)) {
+          const imageExt = matches[1] ?? "png";
+          if (invalidImageSet.has(imageUrl)) {
             continue;
           }
-          // 如果图片未缓存，则加载图片
-          if (workbookImage[imageUrl] === undefined) {
+          if (filledImageMap.has(imageUrl)) {
+            imageId = filledImageMap.get(imageUrl);
+          } else {
             let fileContent = null;
             try {
               fileContent = await fetchUrlFile(imageUrl);
             } catch {
-              invalidImages.push(imageUrl);
+              invalidImageSet.add(imageUrl);
               console.warn(`Fail to load image ${imageUrl}`);
               continue;
             }
             // 将图片添加到工作簿中
-            workbookImage[imageUrl] = workbook.addImage({
+            imageId = workbook.addImage({
               buffer: fileContent,
               extension: imageExt === "jpg" ? "jpeg" : imageExt,
             });
+            filledImageMap.set(imageUrl, imageId);
           }
-          // 将图片添加到工作表中
-          const merge = sheetMerges.find((merge) => {
-            return merge.start.row === rowNumber && merge.start.col === colNumber;
-          });
-          // 坐标系基于零，A1 的左上角将为 {col：0，row：0}，右下角为 {col：1，row：1}
-          worksheet.addImage(workbookImage[imageUrl], {
-            // 左上角
-            tl: {
-              col: merge ? merge.start.col - 1 : colNumber - 1,
-              row: merge ? merge.start.row - 1 : rowNumber - 1,
-            },
-            // 右下角
-            br: {
-              col: merge ? merge.end.col : colNumber,
-              row: merge ? merge.end.row : rowNumber,
-            },
-          });
-          // 去除图片地址
-          cell.value = cell.value.replace(imageRegex, "");
         }
+        // Base64图片
+        else if (base64Regex.test(cell.value)) {
+          targetRegex = base64Regex;
+          const matches = cell.value.match(base64Regex);
+          const imageData = matches[0];
+          const imageExt = matches[1];
+          if (filledImageMap.has(imageData)) {
+            imageId = filledImageMap.get(imageData);
+          } else {
+            imageId = workbook.addImage({
+              base64: imageData,
+              extension: imageExt,
+            });
+            filledImageMap.set(imageData, imageId);
+          }
+        }
+        if (!targetRegex) {
+          continue;
+        }
+        // 将图片添加到工作表中
+        const merge = sheetMerges.find((merge) => {
+          return merge.start.row === rowNumber && merge.start.col === colNumber;
+        });
+        // 坐标系基于零，A1 的左上角将为 {col：0，row：0}，右下角为 {col：1，row：1}
+        worksheet.addImage(imageId, {
+          // 左上角
+          tl: {
+            col: merge ? merge.start.col - 1 : colNumber - 1,
+            row: merge ? merge.start.row - 1 : rowNumber - 1,
+          },
+          // 右下角
+          br: {
+            col: merge ? merge.end.col : colNumber,
+            row: merge ? merge.end.row : rowNumber,
+          },
+        });
+        // 去除图片地址
+        cell.value = cell.value.replace(targetRegex, "");
       }
     }
   }
