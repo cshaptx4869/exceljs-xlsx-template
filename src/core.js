@@ -58,6 +58,7 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
       return;
     }
     // 普通标签替换和迭代标签信息收集
+    /** @type {Array<{iterStartRow: number; iterFieldNames: string[]; iterFieldName: string}>} */
     const sheetIterTags = [];
     worksheet.eachRow((row, rowNumber) => {
       // 行迭代字段
@@ -88,11 +89,12 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
     sheetIterTags.forEach(({ iterStartRow, iterFieldNames, iterFieldName }, iterTagIndex) => {
       // 调整后的起始行
       const adjustedStartRow = iterStartRow + iterOffset;
+      const iterDataLength = sheetData[iterFieldName].length;
       // 多行的情况下，需要复制多行
-      if (sheetData[iterFieldName].length > 1) {
+      if (iterDataLength > 1) {
         // 一次性复制多行
         // NOTE 复制的行不会复制合并信息
-        worksheet.duplicateRow(adjustedStartRow, sheetData[iterFieldName].length - 1, true);
+        worksheet.duplicateRow(adjustedStartRow, iterDataLength - 1, true);
         // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
         const merges = sheetMerges.filter((merge) => {
           return merge.start.row <= iterStartRow && merge.end.row >= iterStartRow;
@@ -103,7 +105,7 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
           }
           // NOTE 在浏览器环境，动态增加的行会使其后面的行取消合并单元格
           const startFixIndex = isBrowser ? (iterTagIndex === 0 ? 1 : 0) : 1;
-          for (let i = startFixIndex; i < sheetData[iterFieldName].length; i++) {
+          for (let i = startFixIndex; i < iterDataLength; i++) {
             for (const merge of merges) {
               sheetDynamicMerges[sheetId].push([
                 merge.start.row + i + iterOffset,
@@ -116,37 +118,49 @@ async function fillTemplate(workbook, workbookData, parseImage = false) {
         }
       }
       // 替换迭代行中的占位符
-      for (let i = 0; i < sheetData[iterFieldName].length; i++) {
+      for (let i = 0; i < iterDataLength; i++) {
         const currentRow = worksheet.getRow(adjustedStartRow + i);
+        // 遍历当前行的单元格
         currentRow.eachCell((cell, colNumber) => {
           // 字符串值
           if (cell.type === ExcelJS.ValueType.String) {
-            for (const iterField of iterFieldNames) {
-              const iterFieldData = sheetData[iterField];
+            // 遍历单元格中的多个迭代字段
+            iterFieldNames.forEach((iterField) => {
+              // 单元格中包含当前迭代字段的占位符
               if (cell.value.includes(`{{@@${iterField}\.`)) {
-                if (iterFieldData[i] !== undefined) {
+                // 当前迭代字段索引数据
+                const currentIterFieldData = sheetData[iterField][i];
+                if (currentIterFieldData !== undefined) {
                   // 迭代字段数据
-                  for (const key in iterFieldData[i]) {
-                    const placeholder = `{{@@${iterField}.${key}}}`;
+                  for (const field in currentIterFieldData) {
+                    const placeholder = `{{@@${iterField}.${field}}}`;
                     if (cell.value.includes(placeholder)) {
-                      if (cell.value.length === placeholder.length && typeof iterFieldData[i][key] !== "object") {
-                        cell.value = iterFieldData[i][key];
-                      } else {
-                        cell.value = cell.value.replace(new RegExp(placeholder, "g"), iterFieldData[i][key] ?? "");
+                      // 完全匹配，替换单元格内容为迭代字段数据
+                      if (cell.value.length === placeholder.length && typeof currentIterFieldData[field] !== "object") {
+                        cell.value = currentIterFieldData[field];
+                        break;
+                      }
+                      // 包含其他内容，部分替换为迭代字段数据
+                      else {
+                        cell.value = cell.value.replace(
+                          new RegExp(placeholder, "g"),
+                          currentIterFieldData[field] ?? ""
+                        );
                       }
                     }
                   }
                 } else {
+                  // 清空单元格内容
                   cell.value = null;
                 }
               }
-            }
+            });
           }
           // TODO 迭代标签单元格为富文本值
         });
       }
       // 更新行号偏移量
-      iterOffset += sheetData[iterFieldName].length - 1;
+      iterOffset += iterDataLength - 1;
     });
     // 修正在浏览器环境，动态增加的行会使其后面的行取消合并单元格
     if (isBrowser) {
@@ -261,12 +275,12 @@ function placeholderRange(worksheet, placeholder = "{{#placeholder}}", clearMatc
 
 /**
  * 处理单元格标签(普通标签替换和迭代标签信息收集)
- * @param {string} target
- * @param {Record<string, any>} worksheetData
- * @param {Array<{iterStartRow: number; iterFieldNames: string[]; iterFieldName: string}>} iterationTags
- * @param {string[]} iterFieldNames
- * @param {number} rowNumber
- * @returns {string}
+ * @param {string} target 单元格值
+ * @param {Record<string, any>} worksheetData 工作表数据
+ * @param {Array<{iterStartRow: number; iterFieldNames: string[]; iterFieldName: string}>} iterationTags 迭代标签信息
+ * @param {string[]} iterFieldNames 行迭代字段
+ * @param {number} rowNumber 行号
+ * @returns {string} 处理后的单元格值
  */
 function processCellTags(target, worksheetData, iterationTags, iterFieldNames, rowNumber) {
   // 普通标签占位符替换
@@ -274,8 +288,9 @@ function processCellTags(target, worksheetData, iterationTags, iterFieldNames, r
     // 允许单元格中有多个普通标签占位符
     const placeholders = target.match(/{{\w+(\.\w+)*}}/g);
     placeholders.forEach((placeholder) => {
+      // 支持 xxx.xxx 格式
       const fields = placeholder.slice(2, -2).split(".");
-      let value = worksheetData;
+      let value = { ...worksheetData };
       let isMatched = true;
       for (let i = 0; i < fields.length; i++) {
         if (fields[i] in value) {
@@ -288,8 +303,10 @@ function processCellTags(target, worksheetData, iterationTags, iterFieldNames, r
       // 数据匹配成功
       if (isMatched) {
         if (target.length === placeholder.length && typeof value !== "object") {
+          // 无其他多余字符的，直接替换标签内容
           target = value;
         } else {
+          // 替换占位符部分内容
           target = target.replace(placeholder, value ?? "");
         }
       }
@@ -297,9 +314,10 @@ function processCellTags(target, worksheetData, iterationTags, iterFieldNames, r
   }
   // 迭代标签信息搜集
   else if (/{{@@\w+\.\w+}}/.test(target)) {
-    // TODO 单元格含多个迭代标签
     // 单元格中仅匹配一个迭代标签占位符
+    // TODO 单元格中含多个不同的迭代标签
     const iterFieldName = target.match(/{{@@(\w+)\.\w+}}/)[1];
+    // 数据存在且为数组类型
     if (
       iterFieldName in worksheetData &&
       Array.isArray(worksheetData[iterFieldName]) &&
@@ -311,6 +329,7 @@ function processCellTags(target, worksheetData, iterationTags, iterFieldNames, r
       } else {
         if (!iterFieldNames.includes(iterFieldName)) {
           iterFieldNames.push(iterFieldName);
+          // 迭代标签字段长度不一致，取最长的（后续按最大长度复制行）
           const lastIterationTag = iterationTags[iterationTags.length - 1];
           if (worksheetData[iterFieldName].length > worksheetData[lastIterationTag.iterFieldName].length) {
             lastIterationTag.iterFieldName = iterFieldName;

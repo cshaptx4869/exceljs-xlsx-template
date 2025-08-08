@@ -26,8 +26,10 @@ const data = [
   },
   {
     invoice_number: "54548",
-    last_name: "John",
-    first_name: "Doe",
+    user: {
+      last_name: "Doe",
+      first_name: "John",
+    },
     phone: "00874****",
     invoice_date: "15/05/2008",
     items: [
