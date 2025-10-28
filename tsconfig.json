@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2015", /* 编译目标 */
+    "lib": ["DOM", "ESNext"],
+    "baseUrl": ".",
+    "rootDir": "./src", /* 项目源码根目录，用来控制编译输出的目录结构 */
+    "module": "ESNext", /* 项目模块类型，输出 ES 模块格式（后续由 Rollup 处理其他格式） */
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowJs": true, /* 是否允许js代码 */
+    "checkJs": false, /* 检查js代码错误 */
+    "strict": true, /* 启用严格模式 */
+    "declaration": true, /* 自动创建声明文件(.d.ts) */
+    "declarationDir": "dist/types", /* 指定类型声明文件输出目录 */
+    "declarationMap": true,
+    "importHelpers": true,
+    "noEmit": true,
+    "outDir": "./dist", /* 编译输出目录（Rollup 会处理最终输出） */
+    "sourceMap": true, /* 自动生成sourcemap文件，便于调试 */
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}

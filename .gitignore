@@ -1,1 +1,8 @@
+.DS_Store
+.history
+.idea
+dist
 node_modules
+.eslintcache
+pnpm-lock.json
+yarn.lock

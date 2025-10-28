@@ -1,33 +1,63 @@
 {
   "name": "exceljs-xlsx-template",
+  "type": "module",
   "version": "2.1.2",
-  "description": "Generate .xlsx file from .xlsx template. Support for Browser and Node.js",
-  "keywords": [
-    "exceljs",
-    "xlsx",
-    "template"
-  ],
   "private": false,
-  "license": "MIT",
+  "description": "Generate .xlsx file from .xlsx template. Support for Browser and Node.js",
   "author": {
     "name": "cshaptx4869",
     "email": "994774638@qq.com"
   },
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cshaptx4869/exceljs-xlsx-template.git"
+    "url": "git+https://github.com/cshaptx4869/exceljs-xlsx-template.git"
   },
-  "main": "./src/index.js",
-  "types": "./index.d.ts",
+  "keywords": [
+    "exceljs",
+    "xlsx",
+    "template",
+    "xlsx-template"
+  ],
+  "main": "dist/index.cjs.js",
+  "module": "dist/index.esm.js",
+  "browser": "dist/index.umd.js",
+  "types": "dist/types/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "build": "rollup -c",
+    "build:watch": "rollup -cw",
+    "clean": "rm -rf dist",
+    "prepublish": "npm run clean && npm run build",
+    "lint": "eslint . --fix",
+    "type-check": "tsc --noEmit",
     "test": "node test/test.js",
-    "build": "webpack"
+    "release:patch": "npm version patch -m \"chore(release): %s\"",
+    "release:minor": "npm version minor -m \"feat(release): %s\"",
+    "release:major": "npm version major -m \"feat(release)! : breaking change %s\"",
+    "prepare": "husky"
   },
   "dependencies": {
     "exceljs": "^4.4.0"
   },
   "devDependencies": {
-    "webpack": "^5.98.0",
-    "webpack-cli": "^6.0.1"
+    "@antfu/eslint-config": "^6.1.0",
+    "@rollup/plugin-commonjs": "^28.0.9",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/node": "^24.9.1",
+    "eslint": "^9.38.0",
+    "eslint-plugin-format": "^1.0.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.6",
+    "rollup": "^4.52.5",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   }
 }
