@@ -24,6 +24,7 @@
   "browser": "dist/index.umd.js",
   "types": "dist/types/index.d.ts",
   "files": [
+    "CHANGELOG.md",
     "dist"
   ],
   "scripts": {
