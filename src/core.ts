@@ -103,6 +103,14 @@ async function fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData
         // 一次性复制多行
         // NOTE 复制的行不会复制合并信息
         worksheet.duplicateRow(adjustedStartRow, iterDataLength - 1, true)
+        // 修正复制行的单元格内容，将不包含占位符的单元格值设为 null
+        for (let i = 1; i < iterDataLength; i++) {
+          worksheet.getRow(adjustedStartRow + i).eachCell((cell) => {
+            if (!/\{\{(.*?)\}\}/.test(cell.text)) {
+              cell.value = null
+            }
+          })
+        }
         // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
         const merges = sheetMerges.filter((merge) => {
           return merge.start.row <= iterStartRow && merge.end.row >= iterStartRow
