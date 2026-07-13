@@ -1,11 +1,26 @@
 # exceljs-xlsx-template
 
-基于 [exceljs](https://github.com/exceljs/exceljs) 库的 .xlsx 模板文件填充引擎。理论上支持 exceljs 库的所有 [api](https://github.com/exceljs/exceljs/blob/master/README_zh.md#目录)。
+## 简介
+
+基于 exceljs 库的 `.xlsx` 模板文件填充引擎。理论上支持 [exceljs](https://github.com/exceljs/exceljs) 库的所有 [api](https://github.com/exceljs/exceljs/blob/master/README_zh.md#目录)。
 
 - 普通标签占位符格式：`{{xxx}}`、`{{xxx.xxx}}`
 - 迭代标签占位符格式：`{{@@xxx.xxx}}`
 
-> 支持浏览器和 node.js 环境下使用。可参考 test 目录下的 [test.html](https://github.com/cshaptx4869/exceljs-xlsx-template/blob/main/test/test.html) 或 [test.js](https://github.com/cshaptx4869/exceljs-xlsx-template/blob/main/test/test.js)。
+## API
+
+核心函数：
+
+- `loadWorkbook(input: RenderInput) `：加载工作簿
+- `fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData, parseImage = false)`：填充 Excel 模板
+- `saveWorkbook(workbook: ExcelJS.Workbook, output: string) `：保存工作簿到文件
+- `renderXlsxTemplate(input: RenderInput, data: RenderData, output: string, options: RenderOptions = { parseImage: false, beforeSave: undefined }) `：渲染 Xlsx 模板
+- `placeholderRange(worksheet: ExcelJS.Worksheet, placeholder = "{{#placeholder}}", clearMatch = true) `：获取自定义占位符单元格范围
+- `fetchUrlFile(urlStr: string)`：获取 url 文件
+
+## 示例
+
+> 参考 test 目录下的 [test.html](https://github.com/cshaptx4869/exceljs-xlsx-template/blob/main/test/test.html) 或 [test.js](https://github.com/cshaptx4869/exceljs-xlsx-template/blob/main/test/test.js)
 
 ```vue
 <script setup lang="ts">
