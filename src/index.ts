@@ -1,4 +1,4 @@
-import type { RenderData, RenderInput, RenderOptions } from "./types"
+import type { FillOptions, RenderData, RenderInput, RenderOptions } from "./types"
 import { fillTemplate, loadWorkbook, placeholderRange, saveWorkbook } from "./core"
 import { fetchUrlFile } from "./helpers"
 
@@ -10,11 +10,12 @@ import { fetchUrlFile } from "./helpers"
  * @param options 配置项
  * @returns Promise<void>
  */
-async function renderXlsxTemplate(input: RenderInput, data: RenderData, output: string, options: RenderOptions = { parseImage: false, beforeSave: undefined }) {
+async function renderXlsxTemplate(input: RenderInput, data: RenderData, output: string, options: RenderOptions = {}) {
+  const { beforeSave, ...fillOptions } = options
   const workbook = await loadWorkbook(input)
-  await fillTemplate(workbook, data, options.parseImage === true)
-  if (typeof options.beforeSave === "function") {
-    await options.beforeSave(workbook)
+  await fillTemplate(workbook, data, fillOptions)
+  if (typeof beforeSave === "function") {
+    await beforeSave(workbook)
   }
   await saveWorkbook(workbook, output)
 }
@@ -31,6 +32,7 @@ export {
 
 // 导出类型定义
 export type {
+  FillOptions,
   RenderData,
   RenderInput,
   RenderOptions,

@@ -12,15 +12,15 @@ const data = [
   {
     name: "John",
     items: [
-      { no: "No.1", name: "JavaScript" },
-      { no: "No.2", name: "CSS" },
-      { no: "No.3", name: "HTML" },
-      { no: "No.4", name: "Node.js" },
-      { no: "No.5", name: "Three.js" },
-      { no: "No.6", name: "Vue" },
-      { no: "No.7", name: "React" },
-      { no: "No.8", name: "Angular" },
-      { no: "No.9", name: "UniApp" },
+      { no: "No.1", name: "JavaScript", quantity: 300 },
+      { no: "No.2", name: "CSS", quantity: 400 },
+      { no: "No.3", name: "HTML", quantity: 500 },
+      { no: "No.4", name: "Node.js", quantity: 600 },
+      { no: "No.5", name: "Three.js", quantity: 700 },
+      { no: "No.6", name: "Vue", quantity: 800 },
+      { no: "No.7", name: "React", quantity: 900 },
+      { no: "No.8", name: "Angular", quantity: 1000 },
+      { no: "No.9", name: "UniApp", quantity: 1100 },
     ],
     projects: [
       { name: "Project 1", description: "Description 1", image: imageUrl },
@@ -31,8 +31,8 @@ const data = [
   {
     invoice_number: "54548",
     user: {
-      last_name: "Doe",
       first_name: "John",
+      last_name: "Chen",
     },
     phone: "00874****",
     invoice_date: "15/05/2008",
@@ -56,6 +56,7 @@ const output = path.join(__dirname, "output", `${Date.now()}.xlsx`)
 // 渲染Xlsx模板
 renderXlsxTemplate(xlsxFile, data, output, {
   parseImage: true,
+  keepDupRowStatic: true,
   beforeSave(workbook) {
     // 获取工作表
     const worksheet = workbook.getWorksheet("新报关单")

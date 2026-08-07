@@ -12,9 +12,9 @@
 核心函数：
 
 - `loadWorkbook(input: RenderInput) `：加载工作簿
-- `fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData, parseImage = false)`：填充 Excel 模板
+- `fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData, options: FillOptions = {})`：填充 Excel 模板
 - `saveWorkbook(workbook: ExcelJS.Workbook, output: string) `：保存工作簿到文件
-- `renderXlsxTemplate(input: RenderInput, data: RenderData, output: string, options: RenderOptions = { parseImage: false, beforeSave: undefined }) `：渲染 Xlsx 模板
+- `renderXlsxTemplate(input: RenderInput, data: RenderData, output: string, options: RenderOptions = {}) `：渲染 Xlsx 模板
 - `placeholderRange(worksheet: ExcelJS.Worksheet, placeholder = "{{#placeholder}}", clearMatch = true) `：获取自定义占位符单元格范围
 - `fetchUrlFile(urlStr: string)`：获取 url 文件
 

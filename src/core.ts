@@ -1,7 +1,20 @@
-import type { ImageRange } from "exceljs"
-import type { IterationTag, RenderData, RenderInput, SheetDynamicMerges } from "./types"
+import type { CellRichTextValue, ImageRange } from "exceljs"
+import type { FillOptions, IterationTag, RenderData, RenderInput, SheetDynamicMerges } from "./types"
 import ExcelJS from "exceljs"
-import { fetchUrlFile, isBrowser } from "./helpers"
+import { fetchUrlFile, getBuffer, getStream, isBrowser } from "./helpers"
+
+// 模块级正则常量，避免循环内重复编译
+/** 占位符匹配（如 {{xxx}} 或 {{@@xxx.yyy}}） */
+const PLACEHOLDER_REGEX = /\{\{(.*?)\}\}/
+/** 普通标签全局匹配（如 {{field}} 或 {{obj.field}}） */
+const NORMAL_TAG_GLOBAL_REGEX = /\{\{\w+(\.\w+)*\}\}/g
+/** 迭代标签字段名捕获（如 {{@@items.field}}） */
+const ITER_FIELD_NAME_REGEX = /\{\{@@(\w+)\.\w+\}\}/
+/** URL 图片匹配 */
+// eslint-disable-next-line regexp/optimal-quantifier-concatenation
+const URL_IMAGE_REGEX = /https?:\/\/\S+(?:\.(jpe?g|png|gif))?/i
+/** Base64 图片匹配 */
+const BASE64_IMAGE_REGEX = /data:image\/(jpeg|gif|png);base64,\S+/i
 
 /**
  * 加载工作簿
@@ -31,10 +44,10 @@ async function loadWorkbook(input: RenderInput) {
         await workbook.xlsx.readFile(input)
       }
     }
-    else if (input instanceof (await import("node:buffer")).Buffer || input instanceof ArrayBuffer) {
+    else if (input instanceof (await getBuffer()) || input instanceof ArrayBuffer) {
       await workbook.xlsx.load(input as ExcelJS.Buffer)
     }
-    else if (input instanceof (await import("node:stream")).Stream) {
+    else if (input instanceof (await getStream())) {
       await workbook.xlsx.read(input)
     }
     else {
@@ -50,10 +63,10 @@ async function loadWorkbook(input: RenderInput) {
  * 填充Excel模板
  * @param workbook - 工作簿对象
  * @param workbookData - 包含模板数据的数组对象
- * @param parseImage - 是否解析图片，默认为 false
+ * @param options - 配置项
  * @returns 填充完成的工作簿对象
  */
-async function fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData, parseImage = false) {
+async function fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData, options: FillOptions = {}) {
   // 第一步：复制行并替换占位符
   // 工作表待合并单元格信息
   const sheetDynamicMerges: SheetDynamicMerges = {}
@@ -73,13 +86,11 @@ async function fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData
         const cellType = cell.type
         // 字符串值
         if (cellType === ExcelJS.ValueType.String) {
-          // @ts-expect-error 一定是String类型
-          cell.value = processCellTags(cell.value, sheetData, sheetIterTags, rowIterFields, rowNumber)
+          cell.value = processCellTags(cell.value as string, sheetData, sheetIterTags, rowIterFields, rowNumber)
         }
         // 富文本值
         else if (cellType === ExcelJS.ValueType.RichText) {
-          // @ts-expect-error 一定是RichText类型
-          cell.value.richText.forEach((item) => {
+          (cell.value as CellRichTextValue).richText.forEach((item) => {
             item.text = processCellTags(item.text, sheetData, sheetIterTags, rowIterFields, rowNumber)
           })
         }
@@ -104,17 +115,17 @@ async function fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData
         // NOTE 复制的行不会复制合并信息
         worksheet.duplicateRow(adjustedStartRow, iterDataLength - 1, true)
         // 修正复制行的单元格内容，将不包含占位符的单元格值设为 null
-        for (let i = 1; i < iterDataLength; i++) {
-          worksheet.getRow(adjustedStartRow + i).eachCell((cell) => {
-            if (!/\{\{(.*?)\}\}/.test(cell.text)) {
-              cell.value = null
-            }
-          })
+        if (options.keepDupRowStatic !== true) {
+          for (let i = 1; i < iterDataLength; i++) {
+            worksheet.getRow(adjustedStartRow + i).eachCell((cell) => {
+              if (!PLACEHOLDER_REGEX.test(cell.text)) {
+                cell.value = null
+              }
+            })
+          }
         }
         // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
-        const merges = sheetMerges.filter((merge) => {
-          return merge.start.row <= iterStartRow && merge.end.row >= iterStartRow
-        })
+        const merges = sheetMerges.filter(merge => merge.start.row <= iterStartRow && merge.end.row >= iterStartRow)
         if (merges.length > 0) {
           if (!sheetDynamicMerges[sheetId]) {
             sheetDynamicMerges[sheetId] = []
@@ -143,29 +154,22 @@ async function fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData
             // 遍历单元格中的多个迭代字段
             iterFieldNames.forEach((iterField) => {
               // 单元格中包含当前迭代字段的占位符
-              // @ts-expect-error 一定是String类型
-              if (cell.value.includes(`{{@@${iterField}\.`)) {
+              if (typeof cell.value === "string" && cell.value.includes(`{{@@${iterField}.`)) {
                 // 当前迭代字段索引数据
                 const currentIterFieldData = sheetData[iterField][i]
                 if (currentIterFieldData !== undefined) {
                   // 迭代字段数据
                   for (const field in currentIterFieldData) {
                     const placeholder = `{{@@${iterField}.${field}}}`
-                    // @ts-expect-error 一定是String类型
                     if (cell.value.includes(placeholder)) {
                       // 完全匹配，替换单元格内容为迭代字段数据
-                      // @ts-expect-error 一定是String类型
                       if (cell.value.length === placeholder.length && typeof currentIterFieldData[field] !== "object") {
                         cell.value = currentIterFieldData[field]
                         break
                       }
                       // 包含其他内容，部分替换为迭代字段数据
                       else {
-                        // @ts-expect-error 一定是String类型
-                        cell.value = cell.value.replace(
-                          new RegExp(placeholder, "g"),
-                          currentIterFieldData[field] ?? "",
-                        )
+                        cell.value = cell.value.replaceAll(placeholder, currentIterFieldData[field] ?? "")
                       }
                     }
                   }
@@ -233,7 +237,7 @@ async function fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData
   }
 
   // 第三步：填充图片
-  parseImage && (await fillImage(workbook))
+  options.parseImage && (await fillImage(workbook))
 
   return workbook
 }
@@ -277,16 +281,14 @@ function placeholderRange(worksheet: ExcelJS.Worksheet, placeholder = "{{#placeh
       const cell = row.getCell(colNumber)
       // 单元格值中是否包含占位符
       if (typeof cell.value === "string" && cell.value.includes(`${placeholder}`)) {
-        const info = sheetMerges.find((merge) => {
-          return merge.start.row === rowNumber && merge.start.col === colNumber
-        })
+        const info = sheetMerges.find(merge => merge.start.row === rowNumber && merge.start.col === colNumber)
         result = info ?? {
           start: { row: rowNumber, col: colNumber },
           end: { row: rowNumber, col: colNumber },
         }
         // 去除占位符
         if (clearMatch) {
-          cell.value = cell.value.replace(new RegExp(`${placeholder}`, "g"), "")
+          cell.value = cell.value.replaceAll(placeholder, "")
         }
         // 跳出循环
         break outer
@@ -307,13 +309,13 @@ function placeholderRange(worksheet: ExcelJS.Worksheet, placeholder = "{{#placeh
  */
 function processCellTags(target: string, worksheetData: Record<string, any>, iterationTags: IterationTag[], iterFieldNames: string[], rowNumber: number) {
   // 普通标签占位符替换
-  if (/\{\{\w+(\.\w+)*\}\}/.test(target)) {
+  const placeholders = target.match(NORMAL_TAG_GLOBAL_REGEX)
+  if (placeholders) {
     // 允许单元格中有多个普通标签占位符
-    const placeholders = target.match(/\{\{\w+(\.\w+)*\}\}/g) ?? []
     placeholders.forEach((placeholder) => {
       // 支持 xxx.xxx 格式
       const fields = placeholder.slice(2, -2).split(".")
-      let value = JSON.parse(JSON.stringify(worksheetData))
+      let value: any = worksheetData
       let isMatched = true
       for (let i = 0; i < fields.length; i++) {
         if (fields[i] in value) {
@@ -338,27 +340,30 @@ function processCellTags(target: string, worksheetData: Record<string, any>, ite
     })
   }
   // 迭代标签信息搜集
-  else if (/\{\{@@\w+\.\w+\}\}/.test(target)) {
-    // 单元格中仅匹配一个迭代标签占位符
-    // TODO 单元格中含多个不同的迭代标签
-    const iterFieldName = target.match(/\{\{@@(\w+)\.\w+\}\}/)?.[1] ?? ""
-    // 数据存在且为数组类型
-    if (
-      iterFieldName in worksheetData
-      && Array.isArray(worksheetData[iterFieldName])
-      && worksheetData[iterFieldName].length > 0
-    ) {
-      if (iterFieldNames.length === 0) {
-        iterFieldNames.push(iterFieldName)
-        iterationTags.push({ iterStartRow: rowNumber, iterFieldNames, iterFieldName })
-      }
-      else {
-        if (!iterFieldNames.includes(iterFieldName)) {
+  else {
+    const iterFieldMatch = target.match(ITER_FIELD_NAME_REGEX)
+    if (iterFieldMatch) {
+      // 单元格中仅匹配一个迭代标签占位符
+      const iterFieldName = iterFieldMatch[1]
+      // TODO 单元格中含多个不同的迭代标签
+      // 数据存在且为数组类型
+      if (
+        iterFieldName in worksheetData
+        && Array.isArray(worksheetData[iterFieldName])
+        && worksheetData[iterFieldName].length > 0
+      ) {
+        if (iterFieldNames.length === 0) {
           iterFieldNames.push(iterFieldName)
-          // 迭代标签字段长度不一致，取最长的（后续按最大长度复制行）
-          const lastIterationTag = iterationTags[iterationTags.length - 1]
-          if (worksheetData[iterFieldName].length > worksheetData[lastIterationTag.iterFieldName].length) {
-            lastIterationTag.iterFieldName = iterFieldName
+          iterationTags.push({ iterStartRow: rowNumber, iterFieldNames, iterFieldName })
+        }
+        else {
+          if (!iterFieldNames.includes(iterFieldName)) {
+            iterFieldNames.push(iterFieldName)
+            // 迭代标签字段长度不一致，取最长的（后续按最大长度复制行）
+            const lastIterationTag = iterationTags[iterationTags.length - 1]
+            if (worksheetData[iterFieldName].length > worksheetData[lastIterationTag.iterFieldName].length) {
+              lastIterationTag.iterFieldName = iterFieldName
+            }
           }
         }
       }
@@ -390,96 +395,110 @@ function sheetMergeInfo(worksheet: ExcelJS.Worksheet) {
  * @param workbook
  */
 async function fillImage(workbook: ExcelJS.Workbook) {
-  const filledImageMap = new Map()
-  const invalidImageSet = new Set()
-  // eslint-disable-next-line regexp/optimal-quantifier-concatenation
-  const urlRegex = /https?:\/\/\S+(?:\.(jpe?g|png|gif))?/i
-  const base64Regex = /data:image\/(jpeg|gif|png);base64,\S+/i
+  const filledImageMap = new Map<string, number>()
+  const invalidImageSet = new Set<string>()
+
+  // 辅助函数：处理单个字符串中的图片
+  const processImageString = async (text: string) => {
+    // URL图片
+    const urlMatches = text.match(URL_IMAGE_REGEX)
+    if (urlMatches) {
+      const imageUrl = urlMatches[0]
+      const imageExt = urlMatches[1] ?? "png"
+      if (invalidImageSet.has(imageUrl)) {
+        return { imageId: null, cleanedText: text }
+      }
+      const cached = filledImageMap.get(imageUrl)
+      if (cached !== undefined) {
+        return { imageId: cached, cleanedText: text.replace(URL_IMAGE_REGEX, "") }
+      }
+      let fileContent
+      try {
+        fileContent = await fetchUrlFile(imageUrl)
+      }
+      catch {
+        invalidImageSet.add(imageUrl)
+        console.warn(`Fail to load image ${imageUrl}`)
+        return { imageId: null, cleanedText: text }
+      }
+      // 将图片添加到工作簿中
+      const imageId = workbook.addImage({
+        buffer: fileContent,
+        extension: (imageExt === "jpg" ? "jpeg" : imageExt) as "png" | "jpeg" | "gif",
+      })
+      filledImageMap.set(imageUrl, imageId)
+      return { imageId, cleanedText: text.replace(URL_IMAGE_REGEX, "") }
+    }
+
+    // Base64图片
+    const base64Matches = text.match(BASE64_IMAGE_REGEX)
+    if (base64Matches) {
+      const imageData = base64Matches[0]
+      const imageExt = base64Matches[1]
+      const cached = filledImageMap.get(imageData)
+      if (cached !== undefined) {
+        return { imageId: cached, cleanedText: text.replace(BASE64_IMAGE_REGEX, "") }
+      }
+      const imageId = workbook.addImage({
+        base64: imageData,
+        extension: imageExt as "png" | "jpeg" | "gif",
+      })
+      filledImageMap.set(imageData, imageId)
+      return { imageId, cleanedText: text.replace(BASE64_IMAGE_REGEX, "") }
+    }
+
+    return { imageId: null, cleanedText: text }
+  }
+
   // NOTE eachSheet、eachRow、eachCell都是同步方法，不会等待异步操作完成
   // 遍历每个工作表
   for (let i = 0; i < workbook.worksheets.length; i++) {
     const worksheet = workbook.worksheets[i]
     const sheetMerges = sheetMergeInfo(worksheet)
+    // 辅助函数：将图片添加到工作表指定位置
+    const addImageToCell = (imageId: number, rowNumber: number, colNumber: number) => {
+      const merge = sheetMerges.find(m => m.start.row === rowNumber && m.start.col === colNumber)
+      // 坐标系基于零，A1 的左上角将为 {col：0，row：0}，右下角为 {col：1，row：1}
+      worksheet.addImage(imageId, {
+        // 左上角
+        tl: {
+          col: merge ? merge.start.col - 1 : colNumber - 1,
+          row: merge ? merge.start.row - 1 : rowNumber - 1,
+        },
+        // 右下角
+        br: {
+          col: merge ? merge.end.col : colNumber,
+          row: merge ? merge.end.row : rowNumber,
+        },
+      } as ImageRange)
+    }
     // 遍历每一行
     for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber++) {
       const row = worksheet.getRow(rowNumber)
       // 遍历每个单元格
       for (let colNumber = 1; colNumber <= row.cellCount; colNumber++) {
         const cell = row.getCell(colNumber)
-        if (typeof cell.value !== "string") {
-          continue
+        const cellType = cell.type
+
+        // 字符串值
+        if (cellType === ExcelJS.ValueType.String) {
+          const result = await processImageString(cell.value as string)
+          if (result.imageId !== null) {
+            addImageToCell(result.imageId, rowNumber, colNumber)
+            // 去除图片地址
+            cell.value = result.cleanedText
+          }
         }
-        let targetRegex = null
-        let imageId = 0
-        // URL图片
-        if (urlRegex.test(cell.value)) {
-          targetRegex = urlRegex
-          const matches = cell.value.match(urlRegex)
-          const imageUrl = matches?.[0] ?? ""
-          const imageExt = matches?.[1] ?? "png"
-          if (invalidImageSet.has(imageUrl)) {
-            continue
-          }
-          if (filledImageMap.has(imageUrl)) {
-            imageId = filledImageMap.get(imageUrl)
-          }
-          else {
-            let fileContent = null
-            try {
-              fileContent = await fetchUrlFile(imageUrl)
+        // 富文本值
+        else if (cellType === ExcelJS.ValueType.RichText) {
+          for (const item of (cell.value as CellRichTextValue).richText) {
+            const result = await processImageString(item.text)
+            if (result.imageId !== null) {
+              addImageToCell(result.imageId, rowNumber, colNumber)
+              item.text = result.cleanedText
             }
-            catch {
-              invalidImageSet.add(imageUrl)
-              console.warn(`Fail to load image ${imageUrl}`)
-              continue
-            }
-            // 将图片添加到工作簿中
-            imageId = workbook.addImage({
-              buffer: fileContent,
-              extension: (imageExt === "jpg" ? "jpeg" : imageExt) as "png" | "jpeg" | "gif",
-            })
-            filledImageMap.set(imageUrl, imageId)
           }
         }
-        // Base64图片
-        else if (base64Regex.test(cell.value)) {
-          targetRegex = base64Regex
-          const matches = cell.value.match(base64Regex)!
-          const imageData = matches[0]
-          const imageExt = matches[1]
-          if (filledImageMap.has(imageData)) {
-            imageId = filledImageMap.get(imageData)
-          }
-          else {
-            imageId = workbook.addImage({
-              base64: imageData,
-              extension: imageExt as "png" | "jpeg" | "gif",
-            })
-            filledImageMap.set(imageData, imageId)
-          }
-        }
-        if (!targetRegex) {
-          continue
-        }
-        // 将图片添加到工作表中
-        const merge = sheetMerges.find((merge) => {
-          return merge.start.row === rowNumber && merge.start.col === colNumber
-        })
-        // 坐标系基于零，A1 的左上角将为 {col：0，row：0}，右下角为 {col：1，row：1}
-        worksheet.addImage(imageId, {
-          // 左上角
-          tl: {
-            col: merge ? merge.start.col - 1 : colNumber - 1,
-            row: merge ? merge.start.row - 1 : rowNumber - 1,
-          },
-          // 右下角
-          br: {
-            col: merge ? merge.end.col : colNumber,
-            row: merge ? merge.end.row : rowNumber,
-          },
-        } as ImageRange)
-        // 去除图片地址
-        cell.value = cell.value.replace(targetRegex, "")
       }
     }
   }
