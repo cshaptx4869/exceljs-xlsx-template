@@ -37,14 +37,8 @@ const data = [
     phone: "00874****",
     invoice_date: "15/05/2008",
     items: [
-      {
-        name: "description",
-        unit_price: 300,
-      },
-      {
-        name: "HTML",
-        unit_price: 400,
-      },
+      { name: "PHP", unit_price: 300 },
+      { name: "HTML", unit_price: 400 },
     ],
     subtotal: 700,
     tax: 140,

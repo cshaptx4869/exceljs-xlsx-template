@@ -106,7 +106,23 @@ async function fetchUrlFile(urlStr: string) {
   }
 }
 
+/**
+ * 下载blob文件
+ * @param blob - Blob对象
+ * @param fileName - 文件名
+ */
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = fileName
+  a.click()
+  // 延迟释放，确保浏览器已完成下载触发
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 export {
+  downloadBlob,
   fetchUrlFile,
   getBuffer,
   getHttp,

@@ -1,7 +1,7 @@
 import type { CellRichTextValue, ImageRange } from "exceljs"
 import type { FillOptions, IterationTag, RenderData, RenderInput, SheetDynamicMerges } from "./types"
 import ExcelJS from "exceljs"
-import { fetchUrlFile, getBuffer, getStream, isBrowser } from "./helpers"
+import { downloadBlob, fetchUrlFile, getBuffer, getStream, isBrowser } from "./helpers"
 
 // 模块级正则常量，避免循环内重复编译
 /** 占位符匹配（如 {{xxx}} 或 {{@@xxx.yyy}}） */
@@ -10,6 +10,8 @@ const PLACEHOLDER_REGEX = /\{\{(.*?)\}\}/
 const NORMAL_TAG_GLOBAL_REGEX = /\{\{\w+(\.\w+)*\}\}/g
 /** 迭代标签字段名捕获（如 {{@@items.field}}） */
 const ITER_FIELD_NAME_REGEX = /\{\{@@(\w+)\.\w+\}\}/
+/** HTTP/HTTPS 协议匹配 */
+const HTTP_REGEX = /^https?:\/\//
 /** URL 图片匹配 */
 // eslint-disable-next-line regexp/optimal-quantifier-concatenation
 const URL_IMAGE_REGEX = /https?:\/\/\S+(?:\.(jpe?g|png|gif))?/i
@@ -23,9 +25,8 @@ const BASE64_IMAGE_REGEX = /data:image\/(jpeg|gif|png);base64,\S+/i
  */
 async function loadWorkbook(input: RenderInput) {
   const workbook = new ExcelJS.Workbook()
-  const httpRegex = /^https?:\/\//
   if (isBrowser) {
-    if (typeof input === "string" && httpRegex.test(input)) {
+    if (typeof input === "string" && HTTP_REGEX.test(input)) {
       await workbook.xlsx.load(await fetchUrlFile(input))
     }
     else if (input instanceof Blob || input instanceof ArrayBuffer) {
@@ -37,7 +38,7 @@ async function loadWorkbook(input: RenderInput) {
   }
   else {
     if (typeof input === "string") {
-      if (httpRegex.test(input)) {
+      if (HTTP_REGEX.test(input)) {
         await workbook.xlsx.load(await fetchUrlFile(input))
       }
       else {
@@ -67,7 +68,24 @@ async function loadWorkbook(input: RenderInput) {
  * @returns 填充完成的工作簿对象
  */
 async function fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData, options: FillOptions = {}) {
-  // 第一步：复制行并替换占位符
+  // 第一步：处理占位符替换和行迭代，收集待合并信息
+  const sheetDynamicMerges = processWorkbook(workbook, workbookData, options)
+
+  // 第二步：应用动态合并单元格
+  if (Object.keys(sheetDynamicMerges).length > 0) {
+    await applyDynamicMerges(workbook, sheetDynamicMerges)
+  }
+
+  // 第三步：填充图片
+  options.parseImage && (await fillImage(workbook))
+
+  return workbook
+}
+
+/**
+ * 遍历所有工作表：替换普通占位符 + 处理迭代行，返回动态合并单元格信息
+ */
+function processWorkbook(workbook: ExcelJS.Workbook, workbookData: RenderData, options: FillOptions): SheetDynamicMerges {
   // 工作表待合并单元格信息
   const sheetDynamicMerges: SheetDynamicMerges = {}
   // NOTE 工作簿的sheetId是按工作表创建的顺序从1开始递增
@@ -78,168 +96,188 @@ async function fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData
       return
     }
     // 普通标签替换和迭代标签信息收集
-    const sheetIterTags: IterationTag[] = []
-    worksheet.eachRow((row, rowNumber) => {
-      // 行迭代字段
-      const rowIterFields: string[] = []
-      row.eachCell((cell) => {
-        const cellType = cell.type
-        // 字符串值
-        if (cellType === ExcelJS.ValueType.String) {
-          cell.value = processCellTags(cell.value as string, sheetData, sheetIterTags, rowIterFields, rowNumber)
-        }
-        // 富文本值
-        else if (cellType === ExcelJS.ValueType.RichText) {
-          (cell.value as CellRichTextValue).richText.forEach((item) => {
-            item.text = processCellTags(item.text, sheetData, sheetIterTags, rowIterFields, rowNumber)
+    const sheetIterTags = replaceNormalTagsAndCollectIterTags(worksheet, sheetData)
+    // 迭代标签处理
+    if (sheetIterTags.length > 0) {
+      processIterationTags(worksheet, sheetId, sheetData, sheetIterTags, options, sheetDynamicMerges)
+    }
+  })
+  return sheetDynamicMerges
+}
+
+/**
+ * 替换普通占位符并收集迭代标签信息
+ * @returns 收集到的迭代标签数组
+ */
+function replaceNormalTagsAndCollectIterTags(worksheet: ExcelJS.Worksheet, sheetData: Record<string, any>) {
+  const sheetIterTags: IterationTag[] = []
+  worksheet.eachRow((row, rowNumber) => {
+    // 行迭代字段
+    const rowIterFields: string[] = []
+    row.eachCell((cell) => {
+      const cellType = cell.type
+      // 字符串值
+      if (cellType === ExcelJS.ValueType.String) {
+        cell.value = processCellTags(cell.value as string, sheetData, sheetIterTags, rowIterFields, rowNumber)
+      }
+      // 富文本值
+      else if (cellType === ExcelJS.ValueType.RichText) {
+        (cell.value as CellRichTextValue).richText.forEach((item) => {
+          item.text = processCellTags(item.text, sheetData, sheetIterTags, rowIterFields, rowNumber)
+        })
+      }
+    })
+  })
+  return sheetIterTags
+}
+
+/**
+ * 处理迭代标签：复制行、替换迭代占位符、收集动态合并信息 + 浏览器偏移修正
+ */
+function processIterationTags(
+  worksheet: ExcelJS.Worksheet,
+  sheetId: number,
+  sheetData: Record<string, any>,
+  sheetIterTags: IterationTag[],
+  options: FillOptions,
+  sheetDynamicMerges: SheetDynamicMerges,
+) {
+  // NOTE 合并单元格信息是静态的，不会随着行增加而实时更新
+  const sheetMerges = sheetMergeInfo(worksheet)
+  // 迭代行并替换迭代字段占位符
+  let iterOffset = 0
+  sheetIterTags.forEach(({ iterStartRow, iterFieldNames, iterFieldName }, iterTagIndex) => {
+    // 调整后的起始行
+    const adjustedStartRow = iterStartRow + iterOffset
+    const iterDataLength = sheetData[iterFieldName].length
+    // 多行的情况下，需要复制多行
+    if (iterDataLength > 1) {
+      // 一次性复制多行
+      // NOTE 复制的行不会复制合并信息
+      worksheet.duplicateRow(adjustedStartRow, iterDataLength - 1, true)
+      // 修正复制行的单元格内容，将不包含占位符的单元格值设为 null
+      if (options.keepDupRowStatic !== true) {
+        for (let i = 1; i < iterDataLength; i++) {
+          worksheet.getRow(adjustedStartRow + i).eachCell((cell) => {
+            if (!PLACEHOLDER_REGEX.test(cell.text)) {
+              cell.value = null
+            }
           })
         }
-      })
-    })
-    // 迭代标签处理
-    if (sheetIterTags.length === 0) {
-      return
-    }
-    // 合并单元格信息
-    // NOTE 合并信息是静态的，不会随着行增加而实时更新
-    const sheetMerges = sheetMergeInfo(worksheet)
-    // 迭代行并替换迭代字段占位符
-    let iterOffset = 0
-    sheetIterTags.forEach(({ iterStartRow, iterFieldNames, iterFieldName }, iterTagIndex) => {
-      // 调整后的起始行
-      const adjustedStartRow = iterStartRow + iterOffset
-      const iterDataLength = sheetData[iterFieldName].length
-      // 多行的情况下，需要复制多行
-      if (iterDataLength > 1) {
-        // 一次性复制多行
-        // NOTE 复制的行不会复制合并信息
-        worksheet.duplicateRow(adjustedStartRow, iterDataLength - 1, true)
-        // 修正复制行的单元格内容，将不包含占位符的单元格值设为 null
-        if (options.keepDupRowStatic !== true) {
-          for (let i = 1; i < iterDataLength; i++) {
-            worksheet.getRow(adjustedStartRow + i).eachCell((cell) => {
-              if (!PLACEHOLDER_REGEX.test(cell.text)) {
-                cell.value = null
-              }
-            })
-          }
+      }
+      // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
+      const merges = sheetMerges.filter(merge => merge.start.row <= iterStartRow && merge.end.row >= iterStartRow)
+      if (merges.length > 0) {
+        if (!sheetDynamicMerges[sheetId]) {
+          sheetDynamicMerges[sheetId] = []
         }
-        // 筛选出与当前模板行相关的合并单元格信息，并应用到其复制的行
-        const merges = sheetMerges.filter(merge => merge.start.row <= iterStartRow && merge.end.row >= iterStartRow)
-        if (merges.length > 0) {
-          if (!sheetDynamicMerges[sheetId]) {
-            sheetDynamicMerges[sheetId] = []
-          }
-          // NOTE 在浏览器环境，动态增加的行会使其后面的行取消合并单元格
-          const startFixIndex = isBrowser ? (iterTagIndex === 0 ? 1 : 0) : 1
-          for (let i = startFixIndex; i < iterDataLength; i++) {
-            for (const merge of merges) {
-              sheetDynamicMerges[sheetId].push([
-                merge.start.row + i + iterOffset,
-                merge.start.col,
-                merge.end.row + i + iterOffset,
-                merge.end.col,
-              ])
-            }
+        // NOTE 在浏览器环境，动态增加的行会使其后面的行取消合并单元格
+        const startFixIndex = isBrowser ? (iterTagIndex === 0 ? 1 : 0) : 1
+        for (let i = startFixIndex; i < iterDataLength; i++) {
+          for (const merge of merges) {
+            sheetDynamicMerges[sheetId].push([
+              merge.start.row + i + iterOffset,
+              merge.start.col,
+              merge.end.row + i + iterOffset,
+              merge.end.col,
+            ])
           }
         }
       }
-      // 替换迭代行中的占位符
-      for (let i = 0; i < iterDataLength; i++) {
-        const currentRow = worksheet.getRow(adjustedStartRow + i)
-        // 遍历当前行的单元格
-        currentRow.eachCell((cell) => {
-          // 字符串值
-          if (cell.type === ExcelJS.ValueType.String) {
-            // 遍历单元格中的多个迭代字段
-            iterFieldNames.forEach((iterField) => {
-              // 单元格中包含当前迭代字段的占位符
-              if (typeof cell.value === "string" && cell.value.includes(`{{@@${iterField}.`)) {
-                // 当前迭代字段索引数据
-                const currentIterFieldData = sheetData[iterField][i]
-                if (currentIterFieldData !== undefined) {
-                  // 迭代字段数据
-                  for (const field in currentIterFieldData) {
-                    const placeholder = `{{@@${iterField}.${field}}}`
-                    if (cell.value.includes(placeholder)) {
-                      // 完全匹配，替换单元格内容为迭代字段数据
-                      if (cell.value.length === placeholder.length && typeof currentIterFieldData[field] !== "object") {
-                        cell.value = currentIterFieldData[field]
-                        break
-                      }
-                      // 包含其他内容，部分替换为迭代字段数据
-                      else {
-                        cell.value = cell.value.replaceAll(placeholder, currentIterFieldData[field] ?? "")
-                      }
+    }
+    // 替换迭代行中的占位符
+    for (let i = 0; i < iterDataLength; i++) {
+      const currentRow = worksheet.getRow(adjustedStartRow + i)
+      // 遍历当前行的单元格
+      currentRow.eachCell((cell) => {
+        // 字符串值
+        if (cell.type === ExcelJS.ValueType.String) {
+          // 遍历单元格中的多个迭代字段
+          iterFieldNames.forEach((iterField) => {
+            // 单元格中包含当前迭代字段的占位符
+            if (typeof cell.value === "string" && cell.value.includes(`{{@@${iterField}.`)) {
+              // 当前迭代字段索引数据
+              const currentIterFieldData = sheetData[iterField][i]
+              if (currentIterFieldData !== undefined) {
+                // 迭代字段数据
+                for (const field in currentIterFieldData) {
+                  const placeholder = `{{@@${iterField}.${field}}}`
+                  if (cell.value.includes(placeholder)) {
+                    // 完全匹配，替换单元格内容为迭代字段数据
+                    if (cell.value.length === placeholder.length && typeof currentIterFieldData[field] !== "object") {
+                      cell.value = currentIterFieldData[field]
+                      break
+                    }
+                    // 包含其他内容，部分替换为迭代字段数据
+                    else {
+                      cell.value = cell.value.replaceAll(placeholder, currentIterFieldData[field] ?? "")
                     }
                   }
                 }
-                else {
-                  // 清空单元格内容
-                  cell.value = null
-                }
               }
-            })
-          }
-          // TODO 迭代标签单元格为富文本值
-        })
-      }
-      // 更新行号偏移量
-      iterOffset += iterDataLength - 1
-    })
-    // 修正在浏览器环境，动态增加的行会使其后面的行取消合并单元格
-    if (isBrowser) {
-      const iterRows = sheetIterTags.map(({ iterStartRow }) => iterStartRow)
-      sheetMerges.forEach((merge) => {
-        // 迭代后的偏移行
-        let mergeOffset = 0
-        sheetIterTags.forEach(({ iterStartRow, iterFieldName }) => {
-          if (Array.isArray(sheetData[iterFieldName])) {
-            if (!iterRows.includes(merge.start.row) && merge.start.row > iterStartRow) {
-              mergeOffset += sheetData[iterFieldName].length - 1
+              else {
+                // 清空单元格内容
+                cell.value = null
+              }
             }
+          })
+        }
+        // TODO 迭代标签单元格为富文本值
+      })
+    }
+    // 更新行号偏移量
+    iterOffset += iterDataLength - 1
+  })
+
+  // NOTE: 修正在浏览器环境，动态增加的行会使其后面的行取消合并单元格
+  if (isBrowser) {
+    const iterRows = sheetIterTags.map(({ iterStartRow }) => iterStartRow)
+    sheetMerges.forEach((merge) => {
+      // 迭代后的偏移行
+      let mergeOffset = 0
+      sheetIterTags.forEach(({ iterStartRow, iterFieldName }) => {
+        if (Array.isArray(sheetData[iterFieldName])) {
+          if (!iterRows.includes(merge.start.row) && merge.start.row > iterStartRow) {
+            mergeOffset += sheetData[iterFieldName].length - 1
           }
-        })
-        if (mergeOffset) {
-          if (!sheetDynamicMerges[sheetId]) {
-            sheetDynamicMerges[sheetId] = []
-          }
-          sheetDynamicMerges[sheetId].push([
-            merge.start.row + mergeOffset,
-            merge.start.col,
-            merge.end.row + mergeOffset,
-            merge.end.col,
-          ])
+        }
+      })
+      if (mergeOffset) {
+        if (!sheetDynamicMerges[sheetId]) {
+          sheetDynamicMerges[sheetId] = []
+        }
+        sheetDynamicMerges[sheetId].push([
+          merge.start.row + mergeOffset,
+          merge.start.col,
+          merge.end.row + mergeOffset,
+          merge.end.col,
+        ])
+      }
+    })
+  }
+}
+
+/**
+ * 应用动态合并单元格：将工作簿保存到缓冲再重新加载，然后执行 mergeCells
+ */
+async function applyDynamicMerges(workbook: ExcelJS.Workbook, sheetDynamicMerges: SheetDynamicMerges) {
+  // 将工作簿保存到内存中的缓冲区
+  const buffer = await workbook.xlsx.writeBuffer()
+  // 从缓冲区重新加载工作簿
+  await workbook.xlsx.load(buffer)
+  // 处理合并单元格
+  workbook.eachSheet((worksheet, sheetId) => {
+    if (sheetDynamicMerges[sheetId]) {
+      sheetDynamicMerges[sheetId].forEach((merge) => {
+        try {
+          worksheet.mergeCells(merge)
+        }
+        catch {
+          console.warn(`Fail to merge cells ${merge}`)
         }
       })
     }
   })
-
-  // 第二步：动态行单元格合并处理
-  if (Object.keys(sheetDynamicMerges).length > 0) {
-    // 将工作簿保存到内存中的缓冲区
-    const buffer = await workbook.xlsx.writeBuffer()
-    // 从缓冲区重新加载工作簿
-    await workbook.xlsx.load(buffer)
-    // 处理合并单元格
-    workbook.eachSheet((worksheet, sheetId) => {
-      if (sheetDynamicMerges[sheetId]) {
-        sheetDynamicMerges[sheetId].forEach((merge) => {
-          try {
-            worksheet.mergeCells(merge)
-          }
-          catch {
-            console.warn(`Fail to merge cells ${merge}`)
-          }
-        })
-      }
-    })
-  }
-
-  // 第三步：填充图片
-  options.parseImage && (await fillImage(workbook))
-
-  return workbook
 }
 
 /**
@@ -252,11 +290,7 @@ async function saveWorkbook(workbook: ExcelJS.Workbook, output: string) {
   if (isBrowser) {
     const buffer = await workbook.xlsx.writeBuffer()
     const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
-    const link = document.createElement("a")
-    link.href = URL.createObjectURL(blob)
-    link.download = output
-    link.click()
-    URL.revokeObjectURL(link.href)
+    downloadBlob(blob, output)
   }
   else {
     await workbook.xlsx.writeFile(output)
@@ -280,7 +314,7 @@ function placeholderRange(worksheet: ExcelJS.Worksheet, placeholder = "{{#placeh
     for (let colNumber = 1; colNumber <= row.cellCount; colNumber++) {
       const cell = row.getCell(colNumber)
       // 单元格值中是否包含占位符
-      if (typeof cell.value === "string" && cell.value.includes(`${placeholder}`)) {
+      if (typeof cell.value === "string" && cell.value.includes(placeholder)) {
         const info = sheetMerges.find(merge => merge.start.row === rowNumber && merge.start.col === colNumber)
         result = info ?? {
           start: { row: rowNumber, col: colNumber },

@@ -12,11 +12,12 @@
 核心函数：
 
 - `loadWorkbook(input: RenderInput) `：加载工作簿
-- `fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData, options: FillOptions = {})`：填充 Excel 模板
+- `fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData, options: FillOptions = {})`：填充 Xlsx 模板
 - `saveWorkbook(workbook: ExcelJS.Workbook, output: string) `：保存工作簿到文件
 - `renderXlsxTemplate(input: RenderInput, data: RenderData, output: string, options: RenderOptions = {}) `：渲染 Xlsx 模板
 - `placeholderRange(worksheet: ExcelJS.Worksheet, placeholder = "{{#placeholder}}", clearMatch = true) `：获取自定义占位符单元格范围
 - `fetchUrlFile(urlStr: string)`：获取 url 文件
+- `downloadBlob(blob: Blob, fileName: string)`：下载 blob 文件
 
 ## 示例
 
@@ -25,25 +26,25 @@
 ```vue
 <script setup lang="ts">
 import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js"
-import { fillTemplate, loadWorkbook, placeholderRange, renderXlsxTemplate } from "exceljs-xlsx-template"
+import { downloadBlob, fillTemplate, loadWorkbook, placeholderRange, renderXlsxTemplate } from "exceljs-xlsx-template"
 
 function handleXlsxTemplate(isZip = false) {
   const xlsxFile = "https://raw.githubusercontent.com/cshaptx4869/exceljs-xlsx-template/refs/heads/main/test/assets/template.xlsx"
   const officialsealFile = "https://raw.githubusercontent.com/cshaptx4869/exceljs-xlsx-template/refs/heads/main/test/assets/officialseal.png"
-  const imageUrl = "https://s2.loli.net/2025/03/07/ELZY594enrJwF7G.png"
+  const imageUrl = officialsealFile
   const data = [
     {
       name: "John",
       items: [
-        { no: "No.1", name: "JavaScript" },
-        { no: "No.2", name: "CSS" },
-        { no: "No.3", name: "HTML" },
-        { no: "No.4", name: "Node.js" },
-        { no: "No.5", name: "Three.js" },
-        { no: "No.6", name: "Vue" },
-        { no: "No.7", name: "React" },
-        { no: "No.8", name: "Angular" },
-        { no: "No.9", name: "UniApp" }
+        { no: "No.1", name: "JavaScript", quantity: 300 },
+        { no: "No.2", name: "CSS", quantity: 400 },
+        { no: "No.3", name: "HTML", quantity: 500 },
+        { no: "No.4", name: "Node.js", quantity: 600 },
+        { no: "No.5", name: "Three.js", quantity: 700 },
+        { no: "No.6", name: "Vue", quantity: 800 },
+        { no: "No.7", name: "React", quantity: 900 },
+        { no: "No.8", name: "Angular", quantity: 1000 },
+        { no: "No.9", name: "UniApp", quantity: 1100 }
       ],
       projects: [
         { name: "Project 1", description: "Description 1", image: imageUrl },
@@ -54,13 +55,13 @@ function handleXlsxTemplate(isZip = false) {
     {
       invoice_number: "54548",
       user: {
-        last_name: "Doe",
-        first_name: "John"
+        first_name: "John",
+        last_name: "Chen"
       },
       phone: "00874****",
       invoice_date: "15/05/2008",
       items: [
-        { name: "description", unit_price: 300 },
+        { name: "PHP", unit_price: 300 },
         { name: "HTML", unit_price: 400 }
       ],
       subtotal: 700,
@@ -73,6 +74,7 @@ function handleXlsxTemplate(isZip = false) {
     if (isZip !== true) {
       renderXlsxTemplate(xlsxFile, data, `${Date.now()}.xlsx`, {
         parseImage: true,
+        keepDupRowStatic: true,
         async beforeSave(workbook) {
           // 获取工作表
           const worksheet = workbook.getWorksheet("新报关单")
@@ -104,7 +106,10 @@ function handleXlsxTemplate(isZip = false) {
     } else {
       loadWorkbook(xlsxFile).then(async (workbook) => {
         // 填充模板
-        await fillTemplate(workbook, data, true)
+        await fillTemplate(workbook, data, {
+          parseImage: true,
+          keepDupRowStatic: true
+        })
         // 获取工作表
         const worksheet = workbook.getWorksheet("新报关单")
         if (worksheet) {
@@ -141,12 +146,7 @@ function handleXlsxTemplate(isZip = false) {
         const zipBlob = await zipWriter.close()
 
         // 下载
-        const url = URL.createObjectURL(zipBlob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = `${Date.now()}.zip`
-        a.click()
-        URL.revokeObjectURL(url)
+        downloadBlob(zipBlob, `${Date.now()}.zip`)
       })
     }
   } catch (error) {

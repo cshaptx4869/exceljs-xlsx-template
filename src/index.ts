@@ -1,6 +1,6 @@
 import type { FillOptions, RenderData, RenderInput, RenderOptions } from "./types"
 import { fillTemplate, loadWorkbook, placeholderRange, saveWorkbook } from "./core"
-import { fetchUrlFile } from "./helpers"
+import { downloadBlob, fetchUrlFile } from "./helpers"
 
 /**
  * 渲染Xlsx模板
@@ -22,6 +22,7 @@ async function renderXlsxTemplate(input: RenderInput, data: RenderData, output: 
 
 // 导出核心函数
 export {
+  downloadBlob,
   fetchUrlFile,
   fillTemplate,
   loadWorkbook,
