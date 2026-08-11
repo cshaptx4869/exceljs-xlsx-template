@@ -26,7 +26,7 @@
 ```vue
 <script setup lang="ts">
 import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js"
-import { downloadBlob, fillTemplate, loadWorkbook, placeholderRange, renderXlsxTemplate } from "exceljs-xlsx-template"
+import { downloadBlob, fetchUrlFile, fillTemplate, loadWorkbook, placeholderRange, renderXlsxTemplate } from "exceljs-xlsx-template"
 
 function handleXlsxTemplate(isZip = false) {
   const xlsxFile = "https://raw.githubusercontent.com/cshaptx4869/exceljs-xlsx-template/refs/heads/main/test/assets/template.xlsx"
@@ -79,22 +79,17 @@ function handleXlsxTemplate(isZip = false) {
           // 获取工作表
           const worksheet = workbook.getWorksheet("新报关单")
           if (worksheet) {
-          // 加载图片印章
-            const officialsealRresponse = await fetch(officialsealFile)
-            if (!officialsealRresponse.ok) {
-              console.error(`Failed to download image file, status code: ${officialsealRresponse.status}`)
-              return
-            }
-            const officialsealArrayBuffer = await officialsealRresponse.arrayBuffer()
-            // 将图片添加到工作簿
-            const imageId = workbook.addImage({
-              buffer: officialsealArrayBuffer,
-              extension: "png"
-            })
             // 获取印章占位符位置信息
             const range = placeholderRange(worksheet, "{{#officialseal}}")
             if (range) {
-            // 插入图片到表格中
+              // 加载图片印章
+              const officialsealArrayBuffer = await fetchUrlFile(officialsealFile)
+              // 将图片添加到工作簿
+              const imageId = workbook.addImage({
+                buffer: officialsealArrayBuffer,
+                extension: "png"
+              })
+              // 插入图片到表格中
               worksheet.addImage(imageId, {
                 tl: { col: range.start.col, row: range.start.row - 4 },
                 ext: { width: 200, height: 200 }
@@ -113,21 +108,16 @@ function handleXlsxTemplate(isZip = false) {
         // 获取工作表
         const worksheet = workbook.getWorksheet("新报关单")
         if (worksheet) {
-          // 加载图片印章
-          const officialsealRresponse = await fetch(officialsealFile)
-          if (!officialsealRresponse.ok) {
-            console.error(`Failed to download image file, status code: ${officialsealRresponse.status}`)
-            return
-          }
-          const officialsealArrayBuffer = await officialsealRresponse.arrayBuffer()
-          // 将图片添加到工作簿
-          const imageId = workbook.addImage({
-            buffer: officialsealArrayBuffer,
-            extension: "png"
-          })
           // 获取印章占位符位置信息
           const range = placeholderRange(worksheet, "{{#officialseal}}")
           if (range) {
+            // 加载图片印章
+            const officialsealArrayBuffer = await fetchUrlFile(officialsealFile)
+            // 将图片添加到工作簿
+            const imageId = workbook.addImage({
+              buffer: officialsealArrayBuffer,
+              extension: "png"
+            })
             // 插入图片到表格中
             worksheet.addImage(imageId, {
               tl: { col: range.start.col, row: range.start.row - 4 },
