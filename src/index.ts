@@ -5,15 +5,15 @@ import { downloadBlob, fetchUrlFile } from "./helpers"
 /**
  * 渲染Xlsx模板
  * @param input - 输入数据，可以是本地路径、URL地址、ArrayBuffer、Blob、Buffer
- * @param data - 包含模板数据的数组对象
+ * @param workbookData - 包含模板数据的数组对象
  * @param output - 输出文件路径或文件名
  * @param options 配置项
  * @returns Promise<void>
  */
-async function renderXlsxTemplate(input: RenderInput, data: RenderData, output: string, options: RenderOptions = {}) {
+async function renderXlsxTemplate(input: RenderInput, workbookData: RenderData, output: string, options: RenderOptions = {}) {
   const { beforeSave, ...fillOptions } = options
   const workbook = await loadWorkbook(input)
-  await fillTemplate(workbook, data, fillOptions)
+  await fillTemplate(workbook, workbookData, fillOptions)
   if (typeof beforeSave === "function") {
     await beforeSave(workbook)
   }

@@ -14,7 +14,7 @@
 - `loadWorkbook(input: RenderInput) `：加载工作簿
 - `fillTemplate(workbook: ExcelJS.Workbook, workbookData: RenderData, options: FillOptions = {})`：填充 Xlsx 模板
 - `saveWorkbook(workbook: ExcelJS.Workbook, output: string) `：保存工作簿到文件
-- `renderXlsxTemplate(input: RenderInput, data: RenderData, output: string, options: RenderOptions = {}) `：渲染 Xlsx 模板
+- `renderXlsxTemplate(input: RenderInput, workbookDat: RenderData, output: string, options: RenderOptions = {}) `：渲染 Xlsx 模板
 - `placeholderRange(worksheet: ExcelJS.Worksheet, placeholder = "{{#placeholder}}", clearMatch = true) `：获取自定义占位符单元格范围
 - `fetchUrlFile(urlStr: string)`：获取 url 文件
 - `downloadBlob(blob: Blob, fileName: string)`：下载 blob 文件
@@ -73,10 +73,12 @@ function handleXlsxTemplate(isZip = false) {
   try {
     if (isZip !== true) {
       renderXlsxTemplate(xlsxFile, data, `${Date.now()}.xlsx`, {
+        // 解析图片地址
         parseImage: true,
+        // 保留迭代行静态内容
         keepDupRowStatic: true,
-        async beforeSave(workbook) {
-          // 获取工作表
+        // 保存前处理
+        beforeSave: async (workbook) => {
           const worksheet = workbook.getWorksheet("新报关单")
           if (worksheet) {
             // 获取印章占位符位置信息
@@ -105,7 +107,6 @@ function handleXlsxTemplate(isZip = false) {
           parseImage: true,
           keepDupRowStatic: true
         })
-        // 获取工作表
         const worksheet = workbook.getWorksheet("新报关单")
         if (worksheet) {
           // 获取印章占位符位置信息
